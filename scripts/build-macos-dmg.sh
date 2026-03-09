@@ -81,9 +81,9 @@ rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
 
-# Copy the main voxtype binary
-cp "$BINARY" "$APP_DIR/Contents/MacOS/voxtype"
-chmod +x "$APP_DIR/Contents/MacOS/voxtype"
+# Copy the main voxtype binary (named voxtype-bin to match CFBundleExecutable)
+cp "$BINARY" "$APP_DIR/Contents/MacOS/voxtype-bin"
+chmod +x "$APP_DIR/Contents/MacOS/voxtype-bin"
 
 # Copy VoxtypeMenubar.app
 cp -R "$MENUBAR_APP" "$APP_DIR/Contents/MacOS/"
@@ -111,9 +111,9 @@ cat > "$APP_DIR/Contents/Info.plist" << EOF
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>voxtype</string>
+    <string>voxtype-bin</string>
     <key>CFBundleIdentifier</key>
-    <string>io.voxtype.app</string>
+    <string>io.voxtype.daemon</string>
     <key>CFBundleName</key>
     <string>Voxtype</string>
     <key>CFBundleDisplayName</key>
@@ -134,6 +134,8 @@ cat > "$APP_DIR/Contents/Info.plist" << EOF
     <string>Voxtype needs microphone access to record your voice for transcription.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Voxtype uses AppleScript to type transcribed text into applications.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Voxtype monitors keyboard input to detect your push-to-talk hotkey.</string>
 </dict>
 </plist>
 EOF
@@ -143,14 +145,23 @@ echo "  $APP_DIR"
 du -sh "$APP_DIR"
 echo
 
-# Create DMG
+# Create DMG with Applications symlink for drag-to-install
 echo -e "${YELLOW}Creating DMG...${NC}"
 rm -f "$DMG_PATH"
 
+# Create a staging directory with the app and an Applications symlink
+DMG_STAGING="${RELEASES_DIR}/dmg-staging"
+rm -rf "$DMG_STAGING"
+mkdir -p "$DMG_STAGING"
+cp -R "$APP_DIR" "$DMG_STAGING/"
+ln -s /Applications "$DMG_STAGING/Applications"
+
 hdiutil create -volname "Voxtype ${VERSION}" \
-    -srcfolder "$APP_DIR" \
+    -srcfolder "$DMG_STAGING" \
     -ov -format UDZO \
     "$DMG_PATH"
+
+rm -rf "$DMG_STAGING"
 
 # Get DMG size
 SIZE=$(du -h "$DMG_PATH" | cut -f1)

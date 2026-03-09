@@ -62,6 +62,8 @@ fn generate_info_plist(version: &str) -> String {
     <string>Voxtype needs microphone access for speech-to-text transcription.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>Voxtype needs accessibility access to type transcribed text.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Voxtype monitors keyboard input to detect your push-to-talk hotkey.</string>
 </dict>
 </plist>
 "#,

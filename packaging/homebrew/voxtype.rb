@@ -46,8 +46,8 @@ class Voxtype < Formula
       macos_path.mkpath
       resources_path.mkpath
 
-      # Copy binary to app bundle
-      cp bin/"voxtype", macos_path/"voxtype"
+      # Copy binary to app bundle (named voxtype-bin to match CFBundleExecutable)
+      cp bin/"voxtype", macos_path/"voxtype-bin"
 
       # Create Info.plist
       info_plist = <<~PLIST
@@ -56,9 +56,9 @@ class Voxtype < Formula
         <plist version="1.0">
         <dict>
             <key>CFBundleExecutable</key>
-            <string>voxtype</string>
+            <string>voxtype-bin</string>
             <key>CFBundleIdentifier</key>
-            <string>io.voxtype.app</string>
+            <string>io.voxtype.daemon</string>
             <key>CFBundleName</key>
             <string>Voxtype</string>
             <key>CFBundleDisplayName</key>
@@ -76,9 +76,11 @@ class Voxtype < Formula
             <key>NSHighResolutionCapable</key>
             <true/>
             <key>NSMicrophoneUsageDescription</key>
-            <string>Voxtype needs microphone access to capture your voice for speech-to-text transcription.</string>
+            <string>Voxtype needs microphone access for speech-to-text transcription.</string>
             <key>NSAppleEventsUsageDescription</key>
-            <string>Voxtype needs to send keystrokes to type transcribed text into applications.</string>
+            <string>Voxtype needs accessibility access to type transcribed text.</string>
+            <key>NSInputMonitoringUsageDescription</key>
+            <string>Voxtype monitors keyboard input to detect your push-to-talk hotkey.</string>
         </dict>
         </plist>
       PLIST
@@ -110,27 +112,21 @@ class Voxtype < Formula
     <<~EOS
       Voxtype.app has been installed and linked to ~/Applications.
 
-      To complete setup:
+      To get started, open Voxtype.app:
+        open ~/Applications/Voxtype.app
 
-      1. Download a speech model:
-         voxtype setup --download --model parakeet-tdt-0.6b-v3-int8
+      Voxtype will automatically:
+        - Download a speech model on first launch
+        - Prompt for Microphone and Accessibility permissions
 
-      2. Grant permissions in System Settings > Privacy & Security:
-         • Microphone: Add Voxtype (from ~/Applications)
-         • Input Monitoring: Add Voxtype (from ~/Applications)
-         • Accessibility: Add Voxtype (from ~/Applications)
-
-      3. Start the daemon:
-         brew services start voxtype
-
-      Default hotkey: Right Option (⌥)
+      Default hotkey: fn (Globe key)
       More info: voxtype --help
     EOS
   end
 
   service do
     # Use app bundle path for proper macOS permissions
-    run [opt_prefix/"Voxtype.app/Contents/MacOS/voxtype", "daemon"]
+    run [opt_prefix/"Voxtype.app/Contents/MacOS/voxtype-bin", "daemon"]
     keep_alive true
     log_path var/"log/voxtype.log"
     error_log_path var/"log/voxtype.log"
