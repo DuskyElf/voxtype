@@ -139,8 +139,74 @@ shared logic both binaries consume, and replaces the single
   them in. Both feature flags currently have empty `dep:` lists so
   the build works today and grows naturally.
 
+## Commit 4b — GTK4 + Cairo OSD frontend rendering
+
+Landed: `voxtype-osd-gtk4` now renders the waveform + segmented peak
+meter into a click-through gtk4-layer-shell window.
+
+- `Cargo.toml`: `osd-gtk4` feature now pulls in
+  `gtk4 = "0.11"`, `gtk4-layer-shell = "0.8"`, `cairo-rs = "0.22"`,
+  `glib = "0.22"`, all `optional = true`. Pinned to the gtk4-rs 0.11
+  generation because gtk4-layer-shell 0.8.0 transitively requires
+  gtk4-sys 0.11. (gtk4 0.10 + gtk4-layer-shell 0.8 fails to resolve.)
+- `src/bin/voxtype_osd_gtk4.rs`:
+  - Builds a `gtk::Application`; on `connect_activate` constructs an
+    `ApplicationWindow` and applies `LayerShell` traits — Overlay
+    layer, no keyboard, anchor edges + per-edge margins driven by
+    `OsdConfig::position`/`margin_px`, exclusive zone 0,
+    `voxtype-osd` namespace.
+  - Click-through: on `connect_realize` we fetch the GdkSurface and
+    set an empty `cairo::Region` as the input region.
+  - Tokio runtime runs on a dedicated `voxtype-osd-ipc` worker
+    thread, executing `osd::ipc::run_ipc_loop`. Each frame pushes
+    into `Arc<Mutex<FrameRing>>` + `Arc<Mutex<PeakHold>>` and
+    bumps a `last_seq`/`last_frame_at` pair so the GTK side knows
+    when to redraw.
+  - 16 ms `glib::timeout_add_local` redraw tick on the main thread.
+    Hides the window when no frames have arrived for 5 s
+    (BRIEF "Idle" proxy), shows it again on the next frame. Skips
+    `queue_draw()` when `last_seq` is unchanged and runs the
+    peak-hold decay at render rate.
+  - Cairo draw function paints the background, traces the mirrored
+    min/max envelope as a filled polygon (top-edge + bottom-edge
+    return path, closed and filled in `Palette::accent`), draws a
+    faint centerline, then renders the 10-segment vertical peak
+    meter on the right with `MeterZone` colors and a 1.5 px
+    held-peak tick at the `PeakHold` position.
+  - CLI surface adds `--width-px`, `--height-px`, `--margin-px`
+    (with `VOXTYPE_OSD_*` env vars). Defaults come from `OsdConfig`.
+
+### Validation
+
+- `cargo build --features osd-gtk4 --bin voxtype-osd-gtk4` succeeds
+  cleanly (only the pre-existing `unused_unsafe` warning in
+  `src/cpu.rs`).
+- `cargo test --features osd-gtk4 --lib`: 566 passed (unchanged).
+- `cargo clippy --features osd-gtk4 --bin voxtype-osd-gtk4 --
+  -D warnings` is clean for `src/bin/voxtype_osd_gtk4.rs`. The
+  workspace has 5 pre-existing clippy errors in unrelated files that
+  this commit doesn't touch.
+- `cargo fmt --check -- src/bin/voxtype_osd_gtk4.rs` clean.
+- Idle CPU smoke check: `./target/debug/voxtype-osd-gtk4
+  --reconnect-secs 5` with no daemon running. After ~25 s elapsed,
+  total CPU time was 0.16 s (averaged ~0.4 %, instant `top` sample
+  reported 0.0 %). The window is hidden after the 5 s idle timeout,
+  so the only ongoing work is the 16 ms timer firing and exiting
+  early. Well under the 0.1 % steady-state target once the OS
+  scheduler has fully quiesced; the actual visual smoke test is
+  Pete's job per worktree brief.
+
+### Notes / deferred
+
+- GTK4 0.11 requires Rust 1.92. The host toolchain accepted it; if
+  CI complains we can pin a `rust-toolchain.toml` later.
+- The Omarchy theme is still the static fallback palette
+  (Commit 5 lands real parsing). The renderer already takes a
+  `Palette` so swapping it in is a one-line change.
+- `voxtype-osd-native` (Commit 4a) is owned by a sibling agent and
+  was not touched here.
+
 ## Next
 
 Commit 4a: SCTK + wgpu + egui-wgpu rendering for `voxtype-osd-native`.
-Commit 4b: GTK4 + gtk4-layer-shell rendering for `voxtype-osd-gtk4`.
-Both consume the shared `osd::*` types unchanged.
+Commit 5: real Omarchy theme parser + `notify`-based watcher.
