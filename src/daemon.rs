@@ -488,6 +488,10 @@ pub struct Daemon {
     post_processor: Option<PostProcessor>,
     /// Last post-processed text and when it was produced, for context in subsequent dictations
     last_dictation: Option<(String, Instant)>,
+    /// Audio level broadcaster for the OSD (None when disabled or bind failed)
+    level_hub: Option<audio::levels::LevelHub>,
+    /// Active per-recording level emitter task; aborted when recording stops
+    level_emitter_task: Option<tokio::task::JoinHandle<()>>,
     // Model manager for multi-model support
     model_manager: Option<ModelManager>,
     // Background task for loading model on-demand
@@ -604,6 +608,8 @@ impl Daemon {
             text_processor,
             post_processor,
             last_dictation: None,
+            level_hub: None,
+            level_emitter_task: None,
             model_manager: None,
             model_load_task: None,
             transcription_task: None,
@@ -647,6 +653,52 @@ impl Daemon {
     fn update_state(&self, state_name: &str) {
         if let Some(ref path) = self.state_file_path {
             write_state_file(path, state_name);
+        }
+    }
+
+    /// Start a push-to-talk audio capture and (if enabled) a level emitter.
+    ///
+    /// Returns the capture handle on success. The chunk receiver from the
+    /// capture is plumbed into the level hub so the OSD sees audio frames
+    /// at 100 Hz during recording. The emitter task is tracked so it can
+    /// be cleanly aborted when recording stops.
+    async fn start_recording_capture(&mut self) -> std::result::Result<Box<dyn AudioCapture>, ()> {
+        match audio::create_capture(&self.config.audio) {
+            Ok(mut capture) => match capture.start().await {
+                Ok(chunk_rx) => {
+                    if let Some(hub) = &self.level_hub {
+                        // Cancel any prior emitter (defensive; should be idle).
+                        if let Some(handle) = self.level_emitter_task.take() {
+                            handle.abort();
+                        }
+                        let handle = audio::levels::spawn_emitter(chunk_rx, hub.frame_sink());
+                        self.level_emitter_task = Some(handle);
+                    }
+                    // If level_hub is None we still return Ok; the chunk_rx
+                    // is dropped here, matching previous behaviour.
+                    Ok(capture)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to start audio: {}", e);
+                    self.play_feedback(SoundEvent::Error);
+                    Err(())
+                }
+            },
+            Err(e) => {
+                tracing::error!("Failed to create audio capture: {}", e);
+                self.play_feedback(SoundEvent::Error);
+                Err(())
+            }
+        }
+    }
+
+    /// Stop the level emitter task (if running). The capture's chunk
+    /// receiver will close when the capture itself is dropped, which would
+    /// also end the emitter naturally — this just tightens the loop on
+    /// state transitions.
+    fn stop_level_emitter(&mut self) {
+        if let Some(handle) = self.level_emitter_task.take() {
+            handle.abort();
         }
     }
 
@@ -1210,6 +1262,9 @@ impl Daemon {
             .await;
         }
 
+        // Tear down the OSD audio-frame emitter for this session.
+        self.stop_level_emitter();
+
         // Stop recording and get samples
         if let Some(mut capture) = audio_capture.take() {
             match capture.stop().await {
@@ -1362,12 +1417,25 @@ impl Daemon {
                         } else {
                             // Profile exists but has no post_process_command, use default
                             if let Some(ref post_processor) = self.post_processor {
-                                tracing::info!("Post-processing, has_context: {}", recent_context.is_some());
-                                tracing::debug!("Post-processing input: {:?}, context: {:?}", processed_text, recent_context);
+                                tracing::info!(
+                                    "Post-processing, has_context: {}",
+                                    recent_context.is_some()
+                                );
+                                tracing::debug!(
+                                    "Post-processing input: {:?}, context: {:?}",
+                                    processed_text,
+                                    recent_context
+                                );
                                 let result = post_processor
-                                    .process_with_context(&processed_text, recent_context.as_deref())
+                                    .process_with_context(
+                                        &processed_text,
+                                        recent_context.as_deref(),
+                                    )
                                     .await;
-                                tracing::info!("Post-processed: changed: {}", result != processed_text);
+                                tracing::info!(
+                                    "Post-processed: changed: {}",
+                                    result != processed_text
+                                );
                                 tracing::debug!("Post-processed result: {:?}", result);
                                 result
                             } else {
@@ -1375,8 +1443,15 @@ impl Daemon {
                             }
                         }
                     } else if let Some(ref post_processor) = self.post_processor {
-                        tracing::info!("Post-processing, has_context: {}", recent_context.is_some());
-                        tracing::debug!("Post-processing input: {:?}, context: {:?}", processed_text, recent_context);
+                        tracing::info!(
+                            "Post-processing, has_context: {}",
+                            recent_context.is_some()
+                        );
+                        tracing::debug!(
+                            "Post-processing input: {:?}, context: {:?}",
+                            processed_text,
+                            recent_context
+                        );
                         let result = post_processor
                             .process_with_context(&processed_text, recent_context.as_deref())
                             .await;
@@ -1388,8 +1463,7 @@ impl Daemon {
                     };
 
                     // Track last dictation for context in subsequent post-processing
-                    self.last_dictation =
-                        Some((final_text.clone(), Instant::now()));
+                    self.last_dictation = Some((final_text.clone(), Instant::now()));
 
                     if smart_submit {
                         tracing::debug!(
@@ -1578,6 +1652,24 @@ impl Daemon {
         Config::ensure_directories().map_err(|e| {
             crate::error::VoxtypeError::Config(format!("Failed to create directories: {}", e))
         })?;
+
+        // Start the audio-level broadcaster for the OSD. Failure to bind
+        // the socket is not fatal: the daemon still runs without an OSD
+        // feed, and downstream code treats `level_hub == None` as "no OSD".
+        let level_socket = audio::levels::default_socket_path();
+        match audio::levels::LevelHub::start(level_socket.clone()).await {
+            Ok(hub) => {
+                tracing::info!("OSD audio level socket: {:?}", hub.socket_path());
+                self.level_hub = Some(hub);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Could not start OSD audio level socket at {:?}: {}",
+                    level_socket,
+                    e
+                );
+            }
+        }
 
         // Check if another instance is already running (single-instance safeguard)
         let lock_path = Config::runtime_dir().join("voxtype.lock");
@@ -1806,13 +1898,8 @@ impl Daemon {
 
                                 // Create and start audio capture
                                 tracing::debug!("Creating audio capture with device: {}", self.config.audio.device);
-                                match audio::create_capture(&self.config.audio) {
-                                    Ok(mut capture) => {
-                                        tracing::debug!("Audio capture created, starting...");
-                                        if let Err(e) = capture.start().await {
-                                            tracing::error!("Failed to start audio: {}", e);
-                                            continue;
-                                        }
+                                match self.start_recording_capture().await {
+                                    Ok(capture) => {
                                         tracing::debug!("Audio capture started successfully");
                                         audio_capture = Some(capture);
 
@@ -1844,10 +1931,9 @@ impl Daemon {
                                             }
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::error!("Failed to create audio capture: {}", e);
+                                    Err(()) => {
+                                        // Helper already logged and played the error sound.
                                         cleanup_profile_override();
-                                        self.play_feedback(SoundEvent::Error);
                                     }
                                 }
                             }
@@ -1995,13 +2081,8 @@ impl Daemon {
                                     }
                                 }
 
-                                match audio::create_capture(&self.config.audio) {
-                                    Ok(mut capture) => {
-                                        if let Err(e) = capture.start().await {
-                                            tracing::error!("Failed to start audio: {}", e);
-                                            self.play_feedback(SoundEvent::Error);
-                                            continue;
-                                        }
+                                match self.start_recording_capture().await {
+                                    Ok(capture) => {
                                         audio_capture = Some(capture);
 
                                         // Use EagerRecording state if eager_processing is enabled
@@ -2032,10 +2113,9 @@ impl Daemon {
                                             }
                                         }
                                     }
-                                    Err(e) => {
-                                        tracing::error!("Failed to create audio capture: {}", e);
+                                    Err(()) => {
+                                        // Helper already logged and played the error sound.
                                         cleanup_profile_override();
-                                        self.play_feedback(SoundEvent::Error);
                                     }
                                 }
                             } else if let State::Recording { model_override: current_model_override, .. } = &state {
@@ -2430,45 +2510,40 @@ impl Daemon {
                             }
                         }
 
-                        match audio::create_capture(&self.config.audio) {
-                            Ok(mut capture) => {
-                                if let Err(e) = capture.start().await {
-                                    tracing::error!("Failed to start audio: {}", e);
+                        match self.start_recording_capture().await {
+                            Ok(capture) => {
+                                audio_capture = Some(capture);
+
+                                // Use EagerRecording state if eager_processing is enabled
+                                if self.config.whisper.eager_processing {
+                                    tracing::info!("Using eager input processing");
+                                    state = State::EagerRecording {
+                                        started_at: std::time::Instant::now(),
+                                        model_override,
+                                        accumulated_audio: Vec::new(),
+                                        chunks_sent: 0,
+                                        chunk_results: Vec::new(),
+                                        tasks_in_flight: 0,
+                                    };
                                 } else {
-                                    audio_capture = Some(capture);
+                                    state = State::Recording {
+                                        started_at: std::time::Instant::now(),
+                                        model_override,
+                                    };
+                                }
+                                self.update_state("recording");
+                                self.play_feedback(SoundEvent::RecordingStart);
+                                self.pause_media_players().await;
 
-                                    // Use EagerRecording state if eager_processing is enabled
-                                    if self.config.whisper.eager_processing {
-                                        tracing::info!("Using eager input processing");
-                                        state = State::EagerRecording {
-                                            started_at: std::time::Instant::now(),
-                                            model_override,
-                                            accumulated_audio: Vec::new(),
-                                            chunks_sent: 0,
-                                            chunk_results: Vec::new(),
-                                            tasks_in_flight: 0,
-                                        };
-                                    } else {
-                                        state = State::Recording {
-                                            started_at: std::time::Instant::now(),
-                                            model_override,
-                                        };
-                                    }
-                                    self.update_state("recording");
-                                    self.play_feedback(SoundEvent::RecordingStart);
-                                    self.pause_media_players().await;
-
-                                    // Run pre-recording hook (e.g., enter compositor submap for cancel)
-                                    if let Some(cmd) = &self.config.output.pre_recording_command {
-                                        if let Err(e) = output::run_hook(cmd, "pre_recording").await {
-                                            tracing::warn!("{}", e);
-                                        }
+                                // Run pre-recording hook (e.g., enter compositor submap for cancel)
+                                if let Some(cmd) = &self.config.output.pre_recording_command {
+                                    if let Err(e) = output::run_hook(cmd, "pre_recording").await {
+                                        tracing::warn!("{}", e);
                                     }
                                 }
                             }
-                            Err(e) => {
-                                tracing::error!("Failed to create audio capture: {}", e);
-                                self.play_feedback(SoundEvent::Error);
+                            Err(()) => {
+                                // Helper already logged and played the error sound.
                             }
                         }
                     }
@@ -2856,6 +2931,12 @@ impl Daemon {
         // Remove PID file on shutdown
         if let Some(ref path) = self.pid_file_path {
             cleanup_pid_file(path);
+        }
+
+        // Remove the OSD audio level socket so a stale path doesn't
+        // confuse the next daemon start.
+        if let Some(ref hub) = self.level_hub {
+            hub.cleanup();
         }
 
         tracing::info!("Daemon stopped");
