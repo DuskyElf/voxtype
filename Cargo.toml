@@ -91,6 +91,11 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 [features]
 default = []
+# OSD frontends. Each binary is gated on its own feature so users can
+# build only the rendering stack they need. Real GUI deps land in
+# Commits 4a/4b; the lists below grow then.
+osd-native = []
+osd-gtk4 = []
 gpu-vulkan = ["whisper-rs/vulkan"]
 gpu-cuda = ["whisper-rs/cuda"]
 gpu-metal = ["whisper-rs/metal"]
@@ -148,5 +153,11 @@ name = "voxtype"
 path = "src/main.rs"
 
 [[bin]]
-name = "voxtype-osd"
-path = "src/bin/voxtype_osd.rs"
+name = "voxtype-osd-native"
+path = "src/bin/voxtype_osd_native.rs"
+required-features = ["osd-native"]
+
+[[bin]]
+name = "voxtype-osd-gtk4"
+path = "src/bin/voxtype_osd_gtk4.rs"
+required-features = ["osd-gtk4"]

@@ -78,6 +78,7 @@ pub mod error;
 pub mod hotkey;
 pub mod meeting;
 pub mod model_manager;
+pub mod osd;
 pub mod output;
 pub mod setup;
 pub mod state;

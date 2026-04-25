@@ -71,9 +71,76 @@ Smoke check is pending until Pete runs the daemon + OSD side by side. The
 binary builds clean and the IPC types are shared via `voxtype::audio::levels`,
 so a runtime mismatch is impossible.
 
+## Commit 3 — shared `osd::` module + dual-binary skeleton
+
+Pete decided to ship two frontends so users can pick their deployment
+style: `voxtype-osd-native` (SCTK + wgpu + egui-wgpu, single static
+binary) and `voxtype-osd-gtk4` (GTK4 + gtk4-layer-shell, smaller binary,
+dyn-links GTK4 for systems that already ship it). This commit lands the
+shared logic both binaries consume, and replaces the single
+`voxtype-osd` skeleton from Commit 2.
+
+- New module tree at `src/osd/`:
+  - `ipc.rs` — `FrameRing` and `run_ipc_loop` factored out of the old
+    skeleton; takes a per-frame callback so each frontend supplies its
+    own state. Six unit tests on the ring buffer (oldest-first iter,
+    partial-fill, clear/reset).
+  - `visual.rs` — `Color`, `Palette` (with `fallback()`), `MeterZone`,
+    `PeakHold` + free-function `update_peak_hold` matching BRIEF.md
+    verbatim, `EnvelopeColumn`, `project_envelope` (handles partial-ring
+    "fills from right", aggregates min/max when full), and
+    `peak_meter_fraction`. Ten unit tests cover the math.
+  - `config.rs` — `OsdConfig` and `OsdPosition`, defaults match BRIEF.md
+    (`enabled=true`, 600x80, bottom-center, 0.85 opacity, 3s window,
+    6 dB/sec decay). Three tests (defaults, kebab-case serde, partial
+    TOML deserialise).
+  - `theme.rs` — `omarchy_theme_dir()`, `load_palette()` (returns
+    `Palette::fallback()` for now), `ThemeWatcher` placeholder. Real
+    parsing + `notify`-based watcher land in Commit 5. Two tests.
+- Two new feature-gated bin entry points:
+  - `src/bin/voxtype_osd_native.rs` (required-features `osd-native`)
+  - `src/bin/voxtype_osd_gtk4.rs` (required-features `osd-gtk4`)
+  - Both connect via `osd::ipc::run_ipc_loop`, push frames into a
+    shared `Arc<Mutex<FrameRing>>`, run a `PeakHold` update per frame,
+    and emit a `tracing::debug!` line every `--log-every` frames. The
+    `frontend` field in the log line distinguishes them; everything
+    else (seq, peak_dbfs, held_dbfs, ring_len, …) is identical so
+    Pete can verify shared logic by running them side-by-side.
+- `Cargo.toml`: removed the `voxtype-osd` `[[bin]]` entry; added
+  `osd-native` and `osd-gtk4` features (empty for now; GUI deps land
+  in Commits 4a/4b) and the two `[[bin]]` entries gated on those
+  features.
+- `src/lib.rs` exposes `pub mod osd`.
+- Old `src/bin/voxtype_osd.rs` deleted.
+
+### Validation
+
+- `cargo check --offline --lib`: clean (1 pre-existing warning).
+- `cargo check --offline --features osd-native --bin voxtype-osd-native`:
+  clean.
+- `cargo check --offline --features osd-gtk4 --bin voxtype-osd-gtk4`:
+  clean.
+- `cargo test --offline --features osd-native,osd-gtk4 --lib`:
+  566 passed (was 546; +20 new tests in `osd::*`).
+- `cargo clippy --offline --features osd-native,osd-gtk4 --bin
+  voxtype-osd-native --bin voxtype-osd-gtk4` clean for files we
+  touched (preexisting warnings on unmodified files left alone per
+  worktree brief).
+- `cargo fmt -- --check` clean for files we touched.
+
+### Notes
+
+- The shared logic is fully runtime-verifiable now: with the daemon
+  recording, both binaries pump identical frames through the same
+  ring + peak-hold and log identical numerics. Stdout sanity check is
+  Pete's call.
+- Choice of GUI deps for Commits 4a/4b is deferred. The brief lists
+  starting points; verify exact crate names + versions when wiring
+  them in. Both feature flags currently have empty `dep:` lists so
+  the build works today and grows naturally.
+
 ## Next
 
-Commit 3: layer-shell window. Open question is whether eframe/egui's winit
-backend handles `wlr-layer-shell` on current upstream, or whether
-`smithay-client-toolkit` + `wgpu` is the right path. Document the choice in
-the commit message and PR description per BRIEF.md.
+Commit 4a: SCTK + wgpu + egui-wgpu rendering for `voxtype-osd-native`.
+Commit 4b: GTK4 + gtk4-layer-shell rendering for `voxtype-osd-gtk4`.
+Both consume the shared `osd::*` types unchanged.
