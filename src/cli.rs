@@ -383,6 +383,12 @@ pub enum Commands {
     /// Show current configuration
     Config,
 
+    /// Inspect runtime/install information
+    Info {
+        #[command(subcommand)]
+        action: InfoAction,
+    },
+
     /// Show daemon status (for Waybar/polybar integration)
     Status {
         /// Continuously output status changes as JSON (for Waybar exec)
@@ -793,6 +799,16 @@ impl RecordAction {
             None
         }
     }
+}
+
+#[derive(Subcommand)]
+pub enum InfoAction {
+    /// Show installed binary variants and which one is active
+    Variants {
+        /// Emit machine-readable JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]

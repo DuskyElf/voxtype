@@ -86,7 +86,8 @@ pub mod transcribe;
 pub mod vad;
 
 pub use cli::{
-    Cli, Commands, CompositorType, MeetingAction, OutputModeOverride, RecordAction, SetupAction,
+    Cli, Commands, CompositorType, InfoAction, MeetingAction, OutputModeOverride, RecordAction,
+    SetupAction,
 };
 pub use config::Config;
 pub use daemon::Daemon;
