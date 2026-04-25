@@ -126,6 +126,10 @@ dolphin-tensorrt = ["dolphin", "ort/tensorrt"]
 omnilingual = ["onnx-common"]
 omnilingual-cuda = ["omnilingual", "ort/cuda"]
 omnilingual-tensorrt = ["omnilingual", "ort/tensorrt"]
+# Cohere Transcribe backend (proof-of-concept, ONNX-based encoder-decoder).
+# Not wired into CLI/config/factory or release builds; gated behind this feature
+# for opt-in compilation and a feature-gated integration test.
+cohere = ["onnx-common"]
 
 [build-dependencies]
 clap = { version = "4", features = ["derive"] }

@@ -24,6 +24,7 @@ pub mod worker;
     feature = "paraformer",
     feature = "dolphin",
     feature = "omnilingual",
+    feature = "cohere",
 ))]
 pub mod fbank;
 
@@ -33,6 +34,7 @@ pub mod fbank;
     feature = "paraformer",
     feature = "dolphin",
     feature = "omnilingual",
+    feature = "cohere",
 ))]
 pub mod ctc;
 
@@ -53,6 +55,11 @@ pub mod dolphin;
 
 #[cfg(feature = "omnilingual")]
 pub mod omnilingual;
+
+/// Cohere Transcribe backend (proof-of-concept, not wired into factory/CLI/config).
+/// See `src/transcribe/cohere.rs` for usage.
+#[cfg(feature = "cohere")]
+pub mod cohere;
 
 use crate::config::{Config, TranscriptionEngine, WhisperConfig, WhisperMode};
 use crate::error::TranscribeError;
