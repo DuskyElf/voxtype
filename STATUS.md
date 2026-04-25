@@ -22,10 +22,32 @@ Design notes / divergences from the v2 proposal in the prior STATUS:
 - Added `task: JoinHandle<Result<(), TranscribeError>>` so the daemon can `await` the backend's drive task on shutdown / error reporting.
 - `StreamingEvent` is **not** `Clone` (because `TranscribeError` isn't). Documented in code; events are consumed once from the channel which is the only realistic path.
 
+### Commit 2 — output-layer streaming session
+
+`src/output/streaming.rs` adds `StreamingSession`:
+
+- `commit_segment()` types a finalized segment via the existing
+  `output_with_fallback` chain. Tracks `typed_chars` in **Unicode scalars**
+  (not bytes) so cancel-rewind sends one BackSpace per visible character.
+- `observe_partial()` updates an in-memory partial buffer. *Never* typed.
+- `rewind()` emits N BackSpace events via wtype → dotool → ydotool fallback.
+  Best-effort: returns `Err(AllMethodsFailed)` if no backend works, daemon
+  may surface as a soft warning.
+- **Post-process decision: per-segment, with `VOXTYPE_CONTEXT` set to
+  finalized-text-so-far.** Matches the existing eager-mode pattern in
+  `output/post_process.rs::process_with_context`. Skipping it would silently
+  break users who rely on the hook for cleanup. End-of-session would defeat
+  the latency win. Per-segment is the only choice that keeps both.
+- pre/post output hooks fire once per finalized segment (not once per session).
+  Compositor submap toggles need to wrap each typing burst.
+
+550 lib tests pass (6 new in `output::streaming::tests`). Mock `RecordingOutput`
+covers commit, unicode counting, empty-segment no-op, partial replacement,
+finalize-clears-partial, and zero-char rewind.
+
 ## What's next
 
-- **Commit 2** — output-layer changes. Default policy: incremental typing of *Final* segments only, with `typed_chars` tracking on the daemon-side state. Partials update an in-memory status string, never hit the keyboard. Post-process hook: per-final-segment with `VOXTYPE_CONTEXT = finalized_text_so_far` (mirrors the existing eager-mode pattern in `output/post_process.rs`).
-- **Commit 3** — Gemini Live backend via `tokio-tungstenite`. Add dependency, implement `StreamingTranscriber`. Daemon wiring — only when `[transcribe] streaming = true`.
+- **Commit 3** — Gemini Live backend via `tokio-tungstenite`. Add dependency, implement `StreamingTranscriber`. Daemon wiring — only when `[transcribe] streaming = true`. Largest commit; will likely need its own session.
 - **Commit 4** — one local streaming backend. First investigate `whisper-rs` streaming; fall back to chunked-VAD over the existing `WhisperTranscriber` if it doesn't expose stream APIs.
 - **Commit 5** — docs (USER_MANUAL.md, CONFIGURATION.md, TROUBLESHOOTING.md).
 

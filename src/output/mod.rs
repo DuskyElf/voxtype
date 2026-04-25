@@ -17,9 +17,12 @@ pub mod dotool;
 pub mod eitype;
 pub mod paste;
 pub mod post_process;
+pub mod streaming;
 pub mod wtype;
 pub mod xclip;
 pub mod ydotool;
+
+pub use streaming::StreamingSession;
 
 use crate::config::{OutputConfig, OutputDriver};
 use crate::error::OutputError;
