@@ -19,6 +19,41 @@ pub enum OsdPosition {
     TopRight,
 }
 
+/// Selects which OSD frontend the `voxtype-osd` wrapper launches.
+///
+/// The wrapper treats this as a *preference*: if the chosen frontend's
+/// binary isn't on PATH (e.g. the user built voxtype with only one of
+/// `osd-gtk4`/`osd-native`), the wrapper falls back to whichever it can
+/// find and logs a warning. Default is `Gtk4` because GTK4 ships with
+/// most Hyprland setups already (Omarchy pulls it in via swayosd, walker,
+/// etc.) so there's no extra runtime cost for the typical user.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OsdFrontend {
+    #[default]
+    Gtk4,
+    Native,
+}
+
+impl OsdFrontend {
+    /// Name of the binary that implements this frontend, suitable for a
+    /// PATH lookup or `Command::new`.
+    pub fn binary_name(self) -> &'static str {
+        match self {
+            OsdFrontend::Gtk4 => "voxtype-osd-gtk4",
+            OsdFrontend::Native => "voxtype-osd-native",
+        }
+    }
+
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "gtk4" | "gtk" => Some(OsdFrontend::Gtk4),
+            "native" | "wgpu" | "egui" => Some(OsdFrontend::Native),
+            _ => None,
+        }
+    }
+}
+
 /// All user-facing OSD options. Defaults match BRIEF.md.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -44,6 +79,9 @@ pub struct OsdConfig {
     /// scales that up so the envelope fills the available height. 10.0 is
     /// the default; reduce for hot mics, increase for quiet sources.
     pub waveform_gain: f32,
+    /// Which OSD frontend the `voxtype-osd` wrapper launches. Defaults to
+    /// `Gtk4` since GTK4 ships with most Hyprland setups already.
+    pub frontend: OsdFrontend,
 }
 
 impl Default for OsdConfig {
@@ -58,6 +96,7 @@ impl Default for OsdConfig {
             waveform_window_secs: 3.0,
             peak_decay_db_per_sec: 6.0,
             waveform_gain: 10.0,
+            frontend: OsdFrontend::default(),
         }
     }
 }
@@ -86,6 +125,36 @@ mod tests {
         assert_eq!(v, OsdPosition::BottomCenter);
         let v: OsdPosition = serde_json::from_str("\"top-right\"").unwrap();
         assert_eq!(v, OsdPosition::TopRight);
+    }
+
+    #[test]
+    fn frontend_default_is_gtk4() {
+        assert_eq!(OsdFrontend::default(), OsdFrontend::Gtk4);
+        assert_eq!(OsdConfig::default().frontend, OsdFrontend::Gtk4);
+    }
+
+    #[test]
+    fn frontend_binary_names() {
+        assert_eq!(OsdFrontend::Gtk4.binary_name(), "voxtype-osd-gtk4");
+        assert_eq!(OsdFrontend::Native.binary_name(), "voxtype-osd-native");
+    }
+
+    #[test]
+    fn frontend_parse_str_accepts_aliases() {
+        assert_eq!(OsdFrontend::parse_str("gtk4"), Some(OsdFrontend::Gtk4));
+        assert_eq!(OsdFrontend::parse_str("GTK"), Some(OsdFrontend::Gtk4));
+        assert_eq!(OsdFrontend::parse_str("native"), Some(OsdFrontend::Native));
+        assert_eq!(OsdFrontend::parse_str("wgpu"), Some(OsdFrontend::Native));
+        assert_eq!(OsdFrontend::parse_str("egui"), Some(OsdFrontend::Native));
+        assert_eq!(OsdFrontend::parse_str("nope"), None);
+    }
+
+    #[test]
+    fn frontend_serde_kebab_case() {
+        let v: OsdFrontend = serde_json::from_str("\"gtk4\"").unwrap();
+        assert_eq!(v, OsdFrontend::Gtk4);
+        let v: OsdFrontend = serde_json::from_str("\"native\"").unwrap();
+        assert_eq!(v, OsdFrontend::Native);
     }
 
     #[test]
