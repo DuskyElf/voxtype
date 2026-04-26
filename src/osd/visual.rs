@@ -167,59 +167,57 @@ impl EnvelopeColumn {
 /// pixel columns by aggregating min/max over the frames that map to each
 /// column. Columns are oldest-on-left, newest-on-right.
 ///
-/// If the frame count is less than `n_columns`, the leftmost columns stay
-/// silent (so the display "fills in from the right" while the buffer warms
-/// up).
+/// Every column is mapped proportionally to the available frame range,
+/// which means the waveform always fills the entire display width. When
+/// the ring contains fewer frames than columns, frames stretch to cover
+/// the extra columns (one frame may map to several adjacent columns) —
+/// preferable to leaving a permanent dead zone on the left edge that
+/// never receives data.
 pub fn project_envelope(frames: &[AudioFrame], n_columns: usize) -> Vec<EnvelopeColumn> {
     let mut out = vec![EnvelopeColumn::SILENT; n_columns];
     if frames.is_empty() || n_columns == 0 {
         return out;
     }
 
-    // Map newest frame to the rightmost column and walk backward. This
-    // produces a stable visual when the ring is partially filled because
-    // the waveform anchors to "now" on the right.
     let n_frames = frames.len();
-    if n_frames >= n_columns {
-        // Many frames per column: bucket and aggregate.
-        let frames_per_col = n_frames as f32 / n_columns as f32;
-        for (col, slot) in out.iter_mut().enumerate() {
-            let start = (col as f32 * frames_per_col).floor() as usize;
-            let end = (((col + 1) as f32) * frames_per_col).ceil() as usize;
-            let end = end.min(n_frames);
-            let start = start.min(end);
-            let mut min = 0.0_f32;
-            let mut max = 0.0_f32;
-            let mut any = false;
-            for f in &frames[start..end] {
-                if !any {
+    for col in 0..n_columns {
+        // Bucket-map column index to a half-open frame range. When
+        // n_frames >= n_columns, each bucket covers >=1 frame and we
+        // aggregate min/max over the bucket. When n_frames < n_columns,
+        // start..end ends up empty for some buckets (start == end);
+        // we sample-and-hold the previous column's value so the
+        // waveform stretches across the full width instead of leaving
+        // gaps.
+        let start = (col * n_frames) / n_columns;
+        let end = ((col + 1) * n_frames) / n_columns;
+        let mut min = 0.0_f32;
+        let mut max = 0.0_f32;
+        let mut any = false;
+        for f in &frames[start..end] {
+            if !any {
+                min = f.min;
+                max = f.max;
+                any = true;
+            } else {
+                if f.min < min {
                     min = f.min;
+                }
+                if f.max > max {
                     max = f.max;
-                    any = true;
-                } else {
-                    if f.min < min {
-                        min = f.min;
-                    }
-                    if f.max > max {
-                        max = f.max;
-                    }
                 }
             }
-            *slot = if any {
-                EnvelopeColumn { min, max }
-            } else {
-                EnvelopeColumn::SILENT
-            };
         }
-    } else {
-        // Fewer frames than columns: anchor to the right, leave left silent.
-        let offset = n_columns - n_frames;
-        for (i, f) in frames.iter().enumerate() {
-            out[offset + i] = EnvelopeColumn {
-                min: f.min,
-                max: f.max,
-            };
-        }
+        out[col] = if any {
+            EnvelopeColumn { min, max }
+        } else {
+            // Empty bucket: sample-and-hold the nearest frame so the
+            // visualization stretches rather than going silent.
+            let idx = ((col * n_frames) / n_columns).min(n_frames - 1);
+            EnvelopeColumn {
+                min: frames[idx].min,
+                max: frames[idx].max,
+            }
+        };
     }
     out
 }
@@ -303,18 +301,22 @@ mod tests {
     }
 
     #[test]
-    fn envelope_partial_fills_from_right() {
+    fn envelope_partial_stretches_to_fill() {
+        // 2 frames into 5 columns: every column must be populated (no
+        // silent left edge). Frames stretch via sample-and-hold.
         let frames = vec![
             frame(0, -0.1, 0.1, -20.0),
             frame(1, -0.2, 0.2, -14.0),
         ];
         let cols = project_envelope(&frames, 5);
         assert_eq!(cols.len(), 5);
-        assert_eq!(cols[0], EnvelopeColumn::SILENT);
-        assert_eq!(cols[1], EnvelopeColumn::SILENT);
-        assert_eq!(cols[2], EnvelopeColumn::SILENT);
-        assert_eq!(cols[3], EnvelopeColumn { min: -0.1, max: 0.1 });
+        for (i, c) in cols.iter().enumerate() {
+            assert_ne!(*c, EnvelopeColumn::SILENT, "column {i} was silent");
+        }
+        // The newest frame should appear in the last column.
         assert_eq!(cols[4], EnvelopeColumn { min: -0.2, max: 0.2 });
+        // The oldest frame should appear in the first column.
+        assert_eq!(cols[0], EnvelopeColumn { min: -0.1, max: 0.1 });
     }
 
     #[test]

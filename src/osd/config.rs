@@ -39,19 +39,25 @@ pub struct OsdConfig {
     pub waveform_window_secs: f32,
     /// Held-peak decay rate in dB/sec (6.0 per BRIEF).
     pub peak_decay_db_per_sec: f32,
+    /// Visual gain applied to audio samples before drawing the waveform.
+    /// Mic-level voice typically peaks at ~0.1..=0.3 of full-scale; gain
+    /// scales that up so the envelope fills the available height. 10.0 is
+    /// the default; reduce for hot mics, increase for quiet sources.
+    pub waveform_gain: f32,
 }
 
 impl Default for OsdConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            width_px: 600,
-            height_px: 80,
+            width_px: 400,
+            height_px: 48,
             position: OsdPosition::BottomCenter,
             margin_px: 24,
-            opacity: 0.85,
+            opacity: 0.95,
             waveform_window_secs: 3.0,
             peak_decay_db_per_sec: 6.0,
+            waveform_gain: 10.0,
         }
     }
 }
@@ -64,13 +70,14 @@ mod tests {
     fn defaults_match_brief() {
         let c = OsdConfig::default();
         assert!(c.enabled);
-        assert_eq!(c.width_px, 600);
-        assert_eq!(c.height_px, 80);
+        assert_eq!(c.width_px, 400);
+        assert_eq!(c.height_px, 48);
         assert_eq!(c.position, OsdPosition::BottomCenter);
         assert_eq!(c.margin_px, 24);
-        assert!((c.opacity - 0.85).abs() < 1e-6);
+        assert!((c.opacity - 0.95).abs() < 1e-6);
         assert!((c.waveform_window_secs - 3.0).abs() < 1e-6);
         assert!((c.peak_decay_db_per_sec - 6.0).abs() < 1e-6);
+        assert!((c.waveform_gain - 10.0).abs() < 1e-6);
     }
 
     #[test]
@@ -87,7 +94,7 @@ mod tests {
         let c: OsdConfig = toml::from_str(toml_src).unwrap();
         assert_eq!(c.width_px, 800);
         // All other fields default
-        assert_eq!(c.height_px, 80);
+        assert_eq!(c.height_px, 48);
         assert!(c.enabled);
     }
 }
