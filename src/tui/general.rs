@@ -1,7 +1,7 @@
 //! General settings screen: install info, daemon status, variant matrix.
 
 use crate::setup::binary::{Acceleration, EngineFamily, InstallKind, Variant};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -12,33 +12,31 @@ use ratatui::{
 
 use super::app::{Action, App, COLS, ROWS};
 
-pub fn render(f: &mut Frame, app: &App) {
+pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // title bar
             Constraint::Length(banner_height(app)),
             Constraint::Length(8), // install/daemon info
             Constraint::Min(8),    // variant matrix
             Constraint::Length(2), // legend
-            Constraint::Length(1), // help
+            Constraint::Length(1), // section help
         ])
-        .split(f.area());
+        .split(area);
 
-    render_title(f, chunks[0]);
-    render_banner(f, chunks[1], app);
-    render_info(f, chunks[2], app);
+    render_banner(f, chunks[0], app);
+    render_info(f, chunks[1], app);
 
     // Side-by-side: variant matrix on the left, hint pane on the right.
     let body = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
-        .split(chunks[3]);
+        .split(chunks[2]);
     render_matrix(f, body[0], app);
     render_hint(f, body[1], app);
 
-    render_legend(f, chunks[4]);
-    render_help(f, chunks[5]);
+    render_legend(f, chunks[3]);
+    render_help(f, chunks[4]);
 }
 
 fn banner_height(app: &App) -> u16 {
@@ -47,20 +45,6 @@ fn banner_height(app: &App) -> u16 {
     } else {
         0
     }
-}
-
-fn render_title(f: &mut Frame, area: Rect) {
-    let line = Line::from(vec![
-        Span::styled(
-            " Voxtype Configuration ",
-            Style::default()
-                .bg(Color::Blue)
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  General"),
-    ]);
-    f.render_widget(Paragraph::new(line), area);
 }
 
 fn render_banner(f: &mut Frame, area: Rect, app: &App) {
@@ -629,7 +613,7 @@ fn render_legend(f: &mut Frame, area: Rect) {
 
 fn render_help(f: &mut Frame, area: Rect) {
     let line = Line::from(Span::styled(
-        " ↑↓←→ navigate   Enter switch   r refresh   q quit ",
+        " ↑↓←→ navigate matrix   Enter switch   r refresh ",
         Style::default().fg(Color::DarkGray),
     ));
     f.render_widget(Paragraph::new(line), area);
@@ -655,8 +639,6 @@ fn accel_label(a: Acceleration) -> &'static str {
 
 pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Quit,
         KeyCode::Char('r') => {
             app.refresh_inventory();
             Action::None

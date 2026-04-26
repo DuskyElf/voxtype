@@ -3,6 +3,8 @@
 use crate::setup::binary::{self, Acceleration, EngineFamily, InstallKind, Inventory, Variant};
 use std::path::Path;
 
+use super::section::Section;
+
 /// What the event handler asks the run-loop to do next.
 pub enum Action {
     None,
@@ -38,6 +40,14 @@ pub struct App {
     /// Hidden testing flag: render as Package install even when running from a
     /// source build, so the variant matrix can be exercised in dev.
     pub force_package_mode: bool,
+    /// Section currently rendered in the right pane.
+    pub current_section: Section,
+    /// Index into Section::ALL of the section being hovered in the sidebar.
+    /// Independent of `current_section` so the user can scroll the sidebar
+    /// without committing.
+    pub sidebar_cursor: usize,
+    /// True when keyboard input is steered at the sidebar (Tab toggles).
+    pub sidebar_focused: bool,
 }
 
 /// Build the inventory and, if `force_package_mode` is set, override the
@@ -95,7 +105,41 @@ impl App {
             last_switch: None,
             daemon_running: is_daemon_running(),
             force_package_mode,
+            current_section: Section::General,
+            sidebar_cursor: 0,
+            sidebar_focused: true,
         }
+    }
+
+    pub fn move_sidebar(&mut self, delta: i32) {
+        let len = Section::ALL.len() as i32;
+        if len == 0 {
+            return;
+        }
+        let new = (self.sidebar_cursor as i32 + delta).clamp(0, len - 1);
+        self.sidebar_cursor = new as usize;
+    }
+
+    pub fn open_hovered_section(&mut self) {
+        if let Some(section) = Section::ALL.get(self.sidebar_cursor).copied() {
+            self.current_section = section;
+        }
+    }
+
+    pub fn focus_sidebar(&mut self) {
+        self.sidebar_focused = true;
+        // Keep cursor in sync with the active section so the user lands on the
+        // currently-open section when they Tab back to the sidebar.
+        if let Some(idx) = Section::ALL
+            .iter()
+            .position(|s| *s == self.current_section)
+        {
+            self.sidebar_cursor = idx;
+        }
+    }
+
+    pub fn focus_content(&mut self) {
+        self.sidebar_focused = false;
     }
 
     pub fn refresh_inventory(&mut self) {
