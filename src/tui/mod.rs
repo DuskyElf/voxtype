@@ -20,9 +20,9 @@ use app::{Action, App};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
-pub fn run() -> anyhow::Result<()> {
+pub fn run(force_package_mode: bool) -> anyhow::Result<()> {
     let mut terminal = enter_terminal()?;
-    let result = event_loop(&mut terminal);
+    let result = event_loop(&mut terminal, force_package_mode);
     leave_terminal(&mut terminal)?;
     result
 }
@@ -45,8 +45,8 @@ fn leave_terminal(terminal: &mut Tui) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn event_loop(terminal: &mut Tui) -> anyhow::Result<()> {
-    let mut app = App::new();
+fn event_loop(terminal: &mut Tui, force_package_mode: bool) -> anyhow::Result<()> {
+    let mut app = App::new(force_package_mode);
 
     loop {
         terminal.draw(|f| general::render(f, &app))?;

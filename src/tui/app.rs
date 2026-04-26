@@ -1,6 +1,7 @@
 //! TUI application state.
 
-use crate::setup::binary::{self, Acceleration, EngineFamily, Inventory, Variant};
+use crate::setup::binary::{self, Acceleration, EngineFamily, InstallKind, Inventory, Variant};
+use std::path::Path;
 
 /// What the event handler asks the run-loop to do next.
 pub enum Action {
@@ -34,11 +35,58 @@ pub struct App {
     /// Result of the last switch attempt, if any.
     pub last_switch: Option<SwitchOutcome>,
     pub daemon_running: bool,
+    /// Hidden testing flag: render as Package install even when running from a
+    /// source build, so the variant matrix can be exercised in dev.
+    pub force_package_mode: bool,
+}
+
+/// Build the inventory and, if `force_package_mode` is set, override the
+/// install_kind so the TUI exercises the variant-matrix code path during
+/// development without needing to install the binary.
+fn build_inventory(force_package_mode: bool) -> Inventory {
+    let mut inv = binary::inventory();
+    if force_package_mode && inv.install_kind == InstallKind::Source {
+        inv.install_kind = InstallKind::Package;
+        if inv.package_lib_dir.is_none() {
+            inv.package_lib_dir = Some(Path::new(binary::LIB_DIR).to_path_buf());
+        }
+        // If `enumerate_installed()` was skipped because we resolved as Source,
+        // populate the matrix now so cells render with real on-disk state.
+        if inv.variants.is_empty() {
+            inv.variants = Variant::ALL
+                .iter()
+                .map(|&v| binary::VariantStatus {
+                    variant: v,
+                    binary_name: v.binary_name().to_string(),
+                    installed: Path::new(binary::LIB_DIR).join(v.binary_name()).exists(),
+                    runs_on_this_cpu: variant_runs_on_cpu(v, &inv.cpu),
+                    gpu_available: variant_gpu_available(v, &inv.gpus),
+                    active: inv.active_variant == Some(v),
+                })
+                .collect();
+        }
+    }
+    inv
+}
+
+fn variant_runs_on_cpu(v: Variant, cpu: &binary::Cpu) -> bool {
+    match v.acceleration() {
+        Acceleration::Avx512 | Acceleration::Cuda | Acceleration::Rocm => cpu.avx512,
+        _ => cpu.avx2,
+    }
+}
+
+fn variant_gpu_available(v: Variant, g: &binary::Gpus) -> bool {
+    match v.acceleration() {
+        Acceleration::Cuda => g.nvidia,
+        Acceleration::Rocm => g.amd,
+        _ => true,
+    }
 }
 
 impl App {
-    pub fn new() -> Self {
-        let inventory = binary::inventory();
+    pub fn new(force_package_mode: bool) -> Self {
+        let inventory = build_inventory(force_package_mode);
         let cursor = initial_cursor(&inventory);
         Self {
             inventory,
@@ -46,11 +94,12 @@ impl App {
             restart_needed: false,
             last_switch: None,
             daemon_running: is_daemon_running(),
+            force_package_mode,
         }
     }
 
     pub fn refresh_inventory(&mut self) {
-        self.inventory = binary::inventory();
+        self.inventory = build_inventory(self.force_package_mode);
         self.daemon_running = is_daemon_running();
     }
 
@@ -127,7 +176,7 @@ mod tests {
 
     #[test]
     fn variant_at_finds_known_pairs() {
-        let app = App::new();
+        let app = App::new(false);
         // Whisper × AVX2 = WhisperAvx2
         assert_eq!(app.variant_at(0, 0), Some(Variant::WhisperAvx2));
         // ONNX × CUDA = OnnxCuda
@@ -136,7 +185,7 @@ mod tests {
 
     #[test]
     fn variant_at_returns_none_for_invalid_pairs() {
-        let app = App::new();
+        let app = App::new(false);
         // Whisper × CUDA — no such variant
         assert_eq!(app.variant_at(0, 3), None);
         // ONNX × Vulkan — no such variant
@@ -145,7 +194,7 @@ mod tests {
 
     #[test]
     fn move_cursor_clamps_at_edges() {
-        let mut app = App::new();
+        let mut app = App::new(false);
         app.cursor = (0, 0);
         app.move_cursor(-1, -1);
         assert_eq!(app.cursor, (0, 0));

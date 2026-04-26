@@ -390,7 +390,11 @@ pub enum Commands {
     },
 
     /// Open the interactive configuration TUI
-    Configure,
+    Configure {
+        /// Render as if installed from a package (for testing source builds).
+        #[arg(long, hide = true)]
+        force_package_mode: bool,
+    },
 
     /// Show daemon status (for Waybar/polybar integration)
     Status {

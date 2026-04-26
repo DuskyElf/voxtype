@@ -18,7 +18,7 @@ pub fn render(f: &mut Frame, app: &App) {
         .constraints([
             Constraint::Length(1), // title bar
             Constraint::Length(banner_height(app)),
-            Constraint::Length(7), // install/daemon info
+            Constraint::Length(8), // install/daemon info
             Constraint::Min(8),    // variant matrix
             Constraint::Length(2), // legend
             Constraint::Length(1), // help
@@ -28,7 +28,15 @@ pub fn render(f: &mut Frame, app: &App) {
     render_title(f, chunks[0]);
     render_banner(f, chunks[1], app);
     render_info(f, chunks[2], app);
-    render_matrix(f, chunks[3], app);
+
+    // Side-by-side: variant matrix on the left, hint pane on the right.
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
+        .split(chunks[3]);
+    render_matrix(f, body[0], app);
+    render_hint(f, body[1], app);
+
     render_legend(f, chunks[4]);
     render_help(f, chunks[5]);
 }
@@ -108,6 +116,13 @@ fn render_info(f: &mut Frame, area: Rect, app: &App) {
         .map(|v| format!("{} ({})", v.display(), v.binary_name()))
         .unwrap_or_else(|| "unknown (symlink missing or unrecognized)".to_string());
 
+    let rec = &inv.recommendation;
+    let recommended = format!(
+        "{}  /  {}",
+        rec.whisper.display(),
+        rec.onnx.display()
+    );
+
     let lines = vec![
         Line::from(vec![
             Span::raw("Daemon:        "),
@@ -120,6 +135,12 @@ fn render_info(f: &mut Frame, area: Rect, app: &App) {
             install_kind
         )),
         Line::from(format!("Active:        {}", active)),
+        Line::from(vec![
+            Span::raw("Recommended:   "),
+            Span::styled("★ ", Style::default().fg(Color::Cyan)),
+            Span::styled(recommended, Style::default().fg(Color::Cyan)),
+            Span::styled("   (Whisper / ONNX)", Style::default().fg(Color::DarkGray)),
+        ]),
         Line::from(format!(
             "CPU:           AVX2={}  AVX-512={}",
             inv.cpu.avx2, inv.cpu.avx512
@@ -217,11 +238,386 @@ fn render_cell(app: &App, row: usize, col: usize) -> String {
         Some(_) => "✓",
         None => "·",
     };
-    glyph.to_string()
+
+    if is_recommended(variant, &app.inventory.recommendation) {
+        format!("★ {}", glyph)
+    } else {
+        glyph.to_string()
+    }
+}
+
+fn is_recommended(v: Variant, r: &crate::setup::binary::Recommendation) -> bool {
+    v == r.whisper || v == r.onnx
+}
+
+fn render_hint(f: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default().borders(Borders::ALL).title("About");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if app.inventory.install_kind == InstallKind::Source {
+        return;
+    }
+
+    let (r, c) = app.cursor;
+    let lines: Vec<Line> = match app.variant_at(r, c) {
+        Some(variant) => variant_hint_lines(variant, app),
+        None => na_hint_lines(r, c),
+    };
+
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+}
+
+fn variant_hint_lines<'a>(variant: Variant, app: &App) -> Vec<Line<'a>> {
+    let hint = variant_hint(variant);
+    let status = app.inventory.variants.iter().find(|s| s.variant == variant);
+
+    let status_line = match status {
+        Some(s) if s.active => Line::from(Span::styled(
+            "● Currently active",
+            Style::default().fg(Color::Green),
+        )),
+        Some(s) if !s.installed => Line::from(Span::styled(
+            "· Not installed on this system",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Some(s) if !s.runs_on_this_cpu => Line::from(Span::styled(
+            "⚠ Won't run: CPU lacks required instructions",
+            Style::default().fg(Color::Yellow),
+        )),
+        Some(s) if !s.gpu_available => Line::from(Span::styled(
+            "⚠ Won't accelerate: required GPU not detected",
+            Style::default().fg(Color::Yellow),
+        )),
+        Some(_) => Line::from(Span::styled(
+            "✓ Ready to switch (Enter)",
+            Style::default().fg(Color::Cyan),
+        )),
+        None => Line::from(""),
+    };
+
+    let rec = &app.inventory.recommendation;
+    let mut lines: Vec<Line> = Vec::new();
+    if variant == rec.whisper {
+        lines.push(Line::from(Span::styled(
+            "★ Recommended for Whisper on this hardware",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            rec.whisper_reason.to_string(),
+            Style::default().fg(Color::Cyan),
+        )));
+        lines.push(Line::from(""));
+    }
+    if variant == rec.onnx {
+        lines.push(Line::from(Span::styled(
+            "★ Recommended for ONNX engines on this hardware",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(Span::styled(
+            rec.onnx_reason.to_string(),
+            Style::default().fg(Color::Cyan),
+        )));
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        hint.headline.to_string(),
+        Style::default().add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+    for paragraph in hint.body {
+        lines.push(Line::from(paragraph.to_string()));
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(vec![
+        Span::styled("Models:    ", Style::default().fg(Color::DarkGray)),
+        Span::raw(hint.models.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Speed:     ", Style::default().fg(Color::DarkGray)),
+        Span::raw(hint.speed.to_string()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Hardware:  ", Style::default().fg(Color::DarkGray)),
+        Span::raw(hint.hardware.to_string()),
+    ]));
+
+    // Only show concrete model picks on the recommended cells, where the user
+    // is most likely to act on them. On non-recommended cells the static
+    // `models:` line above is enough.
+    if variant == rec.whisper || variant == rec.onnx {
+        let models = recommended_models(variant);
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "Recommended models",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(vec![
+            Span::styled("  English:   ", Style::default().fg(Color::DarkGray)),
+            Span::raw(models.english.to_string()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  European:  ", Style::default().fg(Color::DarkGray)),
+            Span::raw(models.european.to_string()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::styled("  Asian:     ", Style::default().fg(Color::DarkGray)),
+            Span::raw(models.asian.to_string()),
+        ]));
+        if let Some(note) = models.note {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                note.to_string(),
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(status_line);
+    lines
+}
+
+fn na_hint_lines<'a>(row: usize, col: usize) -> Vec<Line<'a>> {
+    let family = ROWS.get(row).copied();
+    let accel = COLS.get(col).copied();
+    let suggestion = match (family, accel) {
+        (Some(EngineFamily::Whisper), Some(Acceleration::Cuda)) => {
+            "For NVIDIA GPU acceleration with Whisper, use Vulkan — it covers \
+             NVIDIA, AMD, and Intel GPUs in a single binary."
+        }
+        (Some(EngineFamily::Whisper), Some(Acceleration::Rocm)) => {
+            "For AMD GPU acceleration with Whisper, use Vulkan — voxtype's \
+             whisper.cpp build uses Vulkan instead of ROCm."
+        }
+        (Some(EngineFamily::Onnx), Some(Acceleration::Vulkan)) => {
+            "ONNX Runtime does not ship a Vulkan execution provider. Use \
+             ONNX (CUDA) for NVIDIA, ONNX (ROCm) for AMD, or ONNX (AVX2/AVX-512) \
+             for CPU."
+        }
+        _ => "This combination is not built.",
+    };
+    vec![
+        Line::from(Span::styled(
+            "Not applicable",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(suggestion.to_string()),
+    ]
+}
+
+struct VariantHint {
+    headline: &'static str,
+    body: &'static [&'static str],
+    models: &'static str,
+    speed: &'static str,
+    hardware: &'static str,
+}
+
+/// Recommended models for a given variant, broken out by language family.
+/// Shown in the hint pane only when the cursor is on a *recommended* cell —
+/// the goal is to give users a jumping-off point ("if I switch to this
+/// binary, what should I download?") rather than a complete model catalog.
+struct ModelRecommendations {
+    english: &'static str,
+    european: &'static str,
+    asian: &'static str,
+    /// Optional advice tied to the acceleration tier (e.g. prefer int8 on AVX2).
+    note: Option<&'static str>,
+}
+
+fn recommended_models(v: Variant) -> ModelRecommendations {
+    match v {
+        // ---- Whisper family ----
+        Variant::WhisperAvx2 | Variant::WhisperNative => ModelRecommendations {
+            english: "small.en  (or base.en for low-power CPUs)",
+            european: "small  (covers FR, DE, IT, ES, NL, PL, PT and more)",
+            asian: "medium  (CJK accuracy improves a lot at medium+)",
+            note: Some(
+                "AVX2-only CPU: large-v3 will run but isn't realtime. Stick to \
+                 small/medium unless you have a GPU.",
+            ),
+        },
+        Variant::WhisperAvx512 => ModelRecommendations {
+            english: "large-v3-turbo  (fast and accurate)",
+            european: "large-v3-turbo  (strong on most EU languages)",
+            asian: "large-v3  (better CJK than turbo for the same size)",
+            note: Some(
+                "AVX-512 makes large-v3-turbo practical on CPU; large-v3 is \
+                 slower but more accurate on non-English.",
+            ),
+        },
+        Variant::WhisperVulkan => ModelRecommendations {
+            english: "large-v3-turbo",
+            european: "large-v3-turbo  (FR, DE, IT, ES, NL, PL, PT, etc.)",
+            asian: "large-v3  (CJK; turbo is slightly weaker on Asian languages)",
+            note: Some(
+                "GPU acceleration removes the size penalty; pick whichever \
+                 model gives you the accuracy you need.",
+            ),
+        },
+
+        // ---- ONNX family ----
+        Variant::OnnxAvx2 | Variant::OnnxNative => ModelRecommendations {
+            english: "parakeet-tdt-0.6b-v3-int8  (quantized; ~50% faster on CPU)",
+            european: "dolphin-base  (multi-language CTC, dictation-tuned)",
+            asian: "sensevoice-small  (zh, en, ja, ko, yue in one model)",
+            note: Some(
+                "On AVX2-only CPUs the int8 Parakeet variant is the practical \
+                 default. Omnilingual is also viable but heavier.",
+            ),
+        },
+        Variant::OnnxAvx512 => ModelRecommendations {
+            english: "parakeet-tdt-0.6b-v3  (top of the Open ASR Leaderboard)",
+            european: "omnilingual-300m  (1600 languages, including all of EU)",
+            asian: "sensevoice-small  (zh, en, ja, ko, yue)",
+            note: Some(
+                "AVX-512 lets you run full-precision Parakeet at real-time \
+                 speed without a GPU.",
+            ),
+        },
+        Variant::OnnxCuda => ModelRecommendations {
+            english: "parakeet-tdt-0.6b-v3",
+            european: "omnilingual-300m  (1600 languages)",
+            asian: "sensevoice-small  (zh/en/ja/ko/yue) or paraformer-zh for Chinese-only",
+            note: Some(
+                "CUDA inference is so fast on Parakeet that English dictation \
+                 is effectively instantaneous; use the largest model that fits \
+                 your VRAM.",
+            ),
+        },
+        Variant::OnnxRocm => ModelRecommendations {
+            english: "parakeet-tdt-0.6b-v3",
+            european: "omnilingual-300m  (1600 languages)",
+            asian: "sensevoice-small  (zh, en, ja, ko, yue)",
+            note: Some(
+                "ROCm execution provider is occasionally flaky; if you see ORT \
+                 init errors, fall back to ONNX (AVX-512) on CPU.",
+            ),
+        },
+    }
+}
+
+fn variant_hint(v: Variant) -> VariantHint {
+    match v {
+        Variant::WhisperAvx2 => VariantHint {
+            headline: "Whisper on AVX2 CPUs",
+            body: &[
+                "Baseline Whisper build. Runs on any x86-64 CPU since ~2013 \
+                 (Haswell/Excavator and newer). Pick this if your CPU lacks \
+                 AVX-512 and you don't have a GPU worth using.",
+            ],
+            models: "tiny, base, small, medium, large-v3, large-v3-turbo (and .en variants)",
+            speed: "Real-time on small/base; large-v3 is slow without a GPU",
+            hardware: "Any x86-64 CPU with AVX2",
+        },
+        Variant::WhisperAvx512 => VariantHint {
+            headline: "Whisper on AVX-512 CPUs",
+            body: &[
+                "Fastest CPU-only Whisper. Roughly 1.5-2x throughput over the \
+                 AVX2 build on supported chips. Use this if you don't have a \
+                 capable GPU but do have a recent Intel or AMD CPU.",
+            ],
+            models: "Same as AVX2; large-v3-turbo becomes practical for live use",
+            speed: "Best CPU performance; ~1.5-2x AVX2",
+            hardware: "Intel Tiger/Ice Lake+, AMD Zen 4+",
+        },
+        Variant::WhisperVulkan => VariantHint {
+            headline: "Whisper with Vulkan GPU",
+            body: &[
+                "Vendor-agnostic GPU acceleration via Vulkan compute shaders. \
+                 Works on NVIDIA, AMD, and Intel GPUs (including integrated \
+                 graphics that support Vulkan).",
+                "Best general-purpose pick for desktops and gaming laptops.",
+            ],
+            models: "All Whisper models; large-v3-turbo runs comfortably",
+            speed: "5-10x CPU on a discrete GPU; falls back to CPU if Vulkan unavailable",
+            hardware: "Any Vulkan 1.2 GPU; ~2 GB VRAM for large-v3",
+        },
+        Variant::WhisperNative => VariantHint {
+            headline: "Whisper (source build)",
+            body: &[
+                "A locally compiled Whisper binary with whatever Cargo features \
+                 you enabled. Reported when no specific tier suffix matches.",
+            ],
+            models: "Whatever your build supports",
+            speed: "Depends on build flags (RUSTFLAGS, GPU features)",
+            hardware: "Whatever you compiled for",
+        },
+        Variant::OnnxAvx2 => VariantHint {
+            headline: "ONNX engines on AVX2 CPUs",
+            body: &[
+                "CPU inference for the ONNX Runtime engine family: Parakeet, \
+                 Moonshine, SenseVoice, Paraformer, Dolphin, and Omnilingual.",
+                "Pick this when you don't have a GPU but want a faster, more \
+                 accurate alternative to Whisper.",
+            ],
+            models: "parakeet-tdt-0.6b-v3, moonshine-base/tiny, sense-voice-small, paraformer-zh, dolphin-base, omnilingual",
+            speed: "Parakeet is ~2-3x faster than Whisper-large at higher accuracy",
+            hardware: "Any x86-64 CPU with AVX2",
+        },
+        Variant::OnnxAvx512 => VariantHint {
+            headline: "ONNX engines on AVX-512 CPUs",
+            body: &[
+                "Same engine set as ONNX (AVX2), built against a newer toolchain \
+                 that takes advantage of AVX-512 where ONNX Runtime can use it.",
+            ],
+            models: "Same as ONNX (AVX2)",
+            speed: "Modest gain over AVX2 build; ORT does runtime SIMD dispatch",
+            hardware: "Intel Tiger/Ice Lake+, AMD Zen 4+",
+        },
+        Variant::OnnxCuda => VariantHint {
+            headline: "ONNX engines on NVIDIA CUDA",
+            body: &[
+                "GPU inference via the CUDA execution provider. Best choice for \
+                 anyone with a recent NVIDIA card running Parakeet or another \
+                 ONNX engine.",
+                "Note: this binary bundles an ONNX Runtime built with AVX-512, \
+                 so the CPU also needs AVX-512 to load it cleanly.",
+            ],
+            models: "Same as ONNX (AVX2)",
+            speed: "10-20x AVX2 on capable GPUs; Parakeet faster than real-time even at large sizes",
+            hardware: "NVIDIA GPU + CUDA 12 drivers; AVX-512 CPU",
+        },
+        Variant::OnnxRocm => VariantHint {
+            headline: "ONNX engines on AMD ROCm",
+            body: &[
+                "GPU inference via the ROCm execution provider for AMD GPUs.",
+                "Note: this binary bundles an ONNX Runtime built with AVX-512, \
+                 so the CPU also needs AVX-512 to load it cleanly. ROCm support \
+                 is upstream-bumpy; if it's flaky, use ONNX (AVX-512) on CPU \
+                 or switch to Whisper (Vulkan).",
+            ],
+            models: "Same as ONNX (AVX2)",
+            speed: "Comparable to CUDA on similarly-tier GPUs",
+            hardware: "AMD GPU with ROCm runtime; AVX-512 CPU",
+        },
+        Variant::OnnxNative => VariantHint {
+            headline: "ONNX engines (source build)",
+            body: &[
+                "Locally compiled ONNX engine binary with whatever Cargo \
+                 features you enabled. Reported when no specific tier suffix \
+                 matches.",
+            ],
+            models: "Whatever your build supports",
+            speed: "Depends on build flags",
+            hardware: "Whatever you compiled for",
+        },
+    }
 }
 
 fn render_legend(f: &mut Frame, area: Rect) {
     let line = Line::from(vec![
+        Span::styled("★ recommended   ", Style::default().fg(Color::Cyan)),
         Span::raw("● active   "),
         Span::raw("✓ ready   "),
         Span::raw("⚠ CPU/GPU mismatch   "),

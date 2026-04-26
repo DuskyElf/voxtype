@@ -552,8 +552,8 @@ async fn main() -> anyhow::Result<()> {
             run_info_command(action)?;
         }
 
-        Commands::Configure => {
-            voxtype::tui::run()?;
+        Commands::Configure { force_package_mode } => {
+            voxtype::tui::run(force_package_mode)?;
         }
 
         Commands::Status {
@@ -1160,6 +1160,19 @@ fn print_variants_text(inv: &setup::binary::Inventory) {
     println!(
         "  GPU:           NVIDIA={}, AMD={}",
         inv.gpus.nvidia, inv.gpus.amd
+    );
+
+    println!();
+    println!("Recommended for this hardware");
+    println!(
+        "  Whisper:       ★ {}  — {}",
+        inv.recommendation.whisper.display(),
+        inv.recommendation.whisper_reason
+    );
+    println!(
+        "  ONNX:          ★ {}  — {}",
+        inv.recommendation.onnx.display(),
+        inv.recommendation.onnx_reason
     );
 
     println!();

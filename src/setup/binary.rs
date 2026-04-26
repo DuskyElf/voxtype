@@ -183,6 +183,80 @@ pub struct Inventory {
     pub cpu: Cpu,
     pub gpus: Gpus,
     pub compiled_features: Vec<&'static str>,
+    pub recommendation: Recommendation,
+}
+
+/// Hardware-driven recommendations: best variant per engine family for the
+/// detected CPU/GPU.
+#[derive(Debug, Clone, Serialize)]
+pub struct Recommendation {
+    pub whisper: Variant,
+    pub whisper_reason: &'static str,
+    pub onnx: Variant,
+    pub onnx_reason: &'static str,
+    /// Single overall pick when the user has no engine preference. Defaults to
+    /// the Whisper recommendation since voxtype's default engine is Whisper.
+    pub primary: Variant,
+}
+
+pub fn recommend(cpu: &Cpu, gpus: &Gpus) -> Recommendation {
+    let whisper = recommend_whisper(cpu, gpus);
+    let onnx = recommend_onnx(cpu, gpus);
+    Recommendation {
+        whisper: whisper.0,
+        whisper_reason: whisper.1,
+        onnx: onnx.0,
+        onnx_reason: onnx.1,
+        primary: whisper.0,
+    }
+}
+
+fn recommend_whisper(cpu: &Cpu, gpus: &Gpus) -> (Variant, &'static str) {
+    if gpus.nvidia || gpus.amd {
+        // Vulkan covers all GPU vendors and is the most reliable Whisper GPU path.
+        return (
+            Variant::WhisperVulkan,
+            "GPU detected; Vulkan covers NVIDIA, AMD, and Intel in one binary.",
+        );
+    }
+    if cpu.avx512 {
+        return (
+            Variant::WhisperAvx512,
+            "AVX-512 CPU, no GPU; this is the fastest CPU-only Whisper build.",
+        );
+    }
+    (
+        Variant::WhisperAvx2,
+        "AVX2-only CPU, no GPU; the safe default for Whisper.",
+    )
+}
+
+fn recommend_onnx(cpu: &Cpu, gpus: &Gpus) -> (Variant, &'static str) {
+    // CUDA/ROCm bundles ship with AVX-512 ONNX Runtime, so the CPU has to
+    // support it before we can recommend a GPU variant.
+    if gpus.nvidia && cpu.avx512 {
+        return (
+            Variant::OnnxCuda,
+            "NVIDIA GPU + AVX-512 CPU; CUDA execution provider is the fastest Parakeet path.",
+        );
+    }
+    if gpus.amd && cpu.avx512 {
+        return (
+            Variant::OnnxAvx512,
+            "AMD GPU detected, but ROCm support is upstream-bumpy; ONNX (AVX-512) on CPU \
+             is more reliable for now. Switch to ONNX (ROCm) if you've validated it on your card.",
+        );
+    }
+    if cpu.avx512 {
+        return (
+            Variant::OnnxAvx512,
+            "AVX-512 CPU, no compatible GPU; this is the fastest CPU-only ONNX build.",
+        );
+    }
+    (
+        Variant::OnnxAvx2,
+        "AVX2-only CPU; ONNX (AVX2) keeps Parakeet/Moonshine/etc. available without GPU.",
+    )
 }
 
 pub fn detect_cpu() -> Cpu {
@@ -345,6 +419,8 @@ pub fn inventory() -> Inventory {
         None
     };
 
+    let recommendation = recommend(&cpu, &gpus);
+
     Inventory {
         install_kind,
         binary_path,
@@ -354,6 +430,7 @@ pub fn inventory() -> Inventory {
         cpu,
         gpus,
         compiled_features: compiled_features(),
+        recommendation,
     }
 }
 
@@ -512,11 +589,56 @@ mod tests {
     }
 
     #[test]
+    fn recommendations_match_hardware() {
+        // No GPU, AVX2 only → Whisper AVX2 + ONNX AVX2.
+        let r = recommend(
+            &Cpu { avx2: true, avx512: false },
+            &Gpus { nvidia: false, amd: false },
+        );
+        assert_eq!(r.whisper, Variant::WhisperAvx2);
+        assert_eq!(r.onnx, Variant::OnnxAvx2);
+        assert_eq!(r.primary, Variant::WhisperAvx2);
+
+        // No GPU, AVX-512 → Whisper AVX-512 + ONNX AVX-512.
+        let r = recommend(
+            &Cpu { avx2: true, avx512: true },
+            &Gpus { nvidia: false, amd: false },
+        );
+        assert_eq!(r.whisper, Variant::WhisperAvx512);
+        assert_eq!(r.onnx, Variant::OnnxAvx512);
+
+        // NVIDIA + AVX-512 → Whisper Vulkan + ONNX CUDA.
+        let r = recommend(
+            &Cpu { avx2: true, avx512: true },
+            &Gpus { nvidia: true, amd: false },
+        );
+        assert_eq!(r.whisper, Variant::WhisperVulkan);
+        assert_eq!(r.onnx, Variant::OnnxCuda);
+
+        // NVIDIA but no AVX-512 → CUDA bundle won't load, fall back to ONNX AVX2.
+        let r = recommend(
+            &Cpu { avx2: true, avx512: false },
+            &Gpus { nvidia: true, amd: false },
+        );
+        assert_eq!(r.whisper, Variant::WhisperVulkan);
+        assert_eq!(r.onnx, Variant::OnnxAvx2);
+
+        // AMD + AVX-512 → Vulkan for Whisper, AVX-512 (not ROCm) for ONNX.
+        let r = recommend(
+            &Cpu { avx2: true, avx512: true },
+            &Gpus { nvidia: false, amd: true },
+        );
+        assert_eq!(r.whisper, Variant::WhisperVulkan);
+        assert_eq!(r.onnx, Variant::OnnxAvx512);
+    }
+
+    #[test]
     fn inventory_runs_without_panicking() {
         let inv = inventory();
         assert!(matches!(
             inv.install_kind,
             InstallKind::Package | InstallKind::Source
         ));
+        let _ = inv.recommendation;
     }
 }
