@@ -210,7 +210,7 @@ impl MlDiarizer {
         }
 
         match Session::builder() {
-            Ok(builder) => match builder.commit_from_file(&path) {
+            Ok(mut builder) => match builder.commit_from_file(&path) {
                 Ok(session) => {
                     self.session = Some(Mutex::new(session));
                     tracing::info!("Loaded speaker embedding model: {:?}", path);

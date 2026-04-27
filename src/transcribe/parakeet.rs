@@ -391,25 +391,23 @@ fn probe_cuda_runtime() -> bool {
     let minor = (version % 1000) / 10;
     tracing::info!("Detected CUDA runtime version: {}.{}", major, minor);
 
-    // The bundled ONNX Runtime (via ort crate) is built against CUDA 12.x.
-    // A major version mismatch causes a segfault in ONNX Runtime's CUDA EP
-    // initialization - there's no way to catch this from Rust.
-    const EXPECTED_CUDA_MAJOR: i32 = 12;
+    // ort 2.0.0-rc.12 ships prebuilt ONNX Runtime binaries for both CUDA 12
+    // and CUDA 13 and selects between them at runtime via cudaRuntimeGetVersion
+    // (override with ORT_CUDA_VERSION). A major version outside that range
+    // would cause a segfault during CUDA EP initialization.
+    const SUPPORTED_CUDA_MAJORS: &[i32] = &[12, 13];
 
-    if major != EXPECTED_CUDA_MAJOR {
+    if !SUPPORTED_CUDA_MAJORS.contains(&major) {
         tracing::error!(
             "CUDA version mismatch: found CUDA {}.{}, but the bundled ONNX Runtime \
-             requires CUDA {}.x. Continuing would crash the process.\n  \
+             requires CUDA 12.x or 13.x. Continuing would crash the process.\n  \
              Options:\n  \
-             1. Install CUDA {} (e.g., the cuda-12 package)\n  \
-             2. Use the pre-built release binary (voxtype-onnx-cuda) which bundles \
-             compatible libraries\n  \
-             3. Build from source with --features parakeet-load-dynamic to link against \
-             your system's ONNX Runtime instead",
+             1. Install CUDA 12 or CUDA 13\n  \
+             2. Use the pre-built release binary (voxtype-onnx-cuda)\n  \
+             3. Build from source with --features parakeet-load-dynamic to link \
+             against your system's ONNX Runtime instead",
             major,
             minor,
-            EXPECTED_CUDA_MAJOR,
-            EXPECTED_CUDA_MAJOR,
         );
         return false;
     }
