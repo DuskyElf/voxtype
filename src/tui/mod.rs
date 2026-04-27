@@ -4,16 +4,17 @@
 //! (variant picker + daemon status) is functional today; remaining sections
 //! ship as placeholders and will be filled in over subsequent PRs.
 
+mod advanced_section;
 mod app;
 mod audio;
 mod common;
+mod compositor_bindings;
 mod config_editor;
 mod engine;
 mod general;
 mod hotkey;
-mod models_section;
-mod advanced_section;
 mod meeting_section;
+mod models_section;
 mod notifications_section;
 mod output_section;
 mod section;

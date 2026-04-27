@@ -11,6 +11,7 @@ use ratatui::{
 
 use super::app::{Action, App};
 use super::common::{self, FeedbackLevel as CommonFeedback, FormRowSpec};
+use super::compositor_bindings;
 use super::config_editor::{ConfigEditor, EditorError};
 
 /// In-memory copy of the hotkey state, owned by `App`. Edits mutate this; `s`
@@ -373,7 +374,7 @@ fn guidance_enabled<'a>(state: &'a HotkeyState) -> Vec<Line<'a>> {
         Line::from(""),
         Line::from(
             "When disabled, voxtype reads no keys. Bind your compositor (\
-             Hyprland, Sway, River, KDE shortcuts) to call:",
+             Hyprland, Sway, Niri, KDE shortcuts) to call:",
         ),
         Line::from(Span::styled(
             "    voxtype record start    voxtype record stop",
@@ -385,6 +386,31 @@ fn guidance_enabled<'a>(state: &'a HotkeyState) -> Vec<Line<'a>> {
         )),
         Line::from(""),
     ];
+
+    let bindings = compositor_bindings::detect();
+    if !bindings.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Compositor bindings detected",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )));
+        for b in &bindings {
+            lines.push(Line::from(format!(
+                "  • [{}] {}  →  voxtype record {}",
+                b.compositor, b.keys, b.action
+            )));
+        }
+        lines.push(Line::from(""));
+    } else if !state.enabled {
+        lines.push(Line::from(Span::styled(
+            "No compositor bindings detected — voxtype will not receive any \
+             PTT key events.",
+            Style::default().fg(Color::Red),
+        )));
+        lines.push(Line::from(""));
+    }
+
     if !state.enabled {
         lines.push(Line::from(Span::styled(
             "Compositor mode active: the rest of this section is ignored.",
