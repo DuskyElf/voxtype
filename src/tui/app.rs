@@ -4,6 +4,7 @@ use crate::setup::binary::{self, Acceleration, EngineFamily, InstallKind, Invent
 use std::path::Path;
 
 use super::audio::AudioState;
+use super::engine::EngineState;
 use super::hotkey::HotkeyState;
 use super::models_section::ModelsState;
 use super::section::Section;
@@ -56,6 +57,7 @@ pub struct App {
     pub hotkey: Option<HotkeyState>,
     pub audio: Option<AudioState>,
     pub models: Option<ModelsState>,
+    pub engine: Option<EngineState>,
 }
 
 /// Build the inventory and, if `force_package_mode` is set, override the
@@ -119,6 +121,7 @@ impl App {
             hotkey: None,
             audio: None,
             models: None,
+            engine: None,
         }
     }
 
@@ -133,6 +136,9 @@ impl App {
             }
             Section::Models if self.models.is_none() => {
                 self.models = ModelsState::load().ok();
+            }
+            Section::Engine if self.engine.is_none() => {
+                self.engine = EngineState::load().ok();
             }
             _ => {}
         }
