@@ -9,6 +9,7 @@ use super::hotkey::HotkeyState;
 use super::models_section::ModelsState;
 use super::output_section::OutputState;
 use super::section::Section;
+use super::text_section::TextState;
 
 /// What the event handler asks the run-loop to do next.
 pub enum Action {
@@ -60,6 +61,7 @@ pub struct App {
     pub models: Option<ModelsState>,
     pub engine: Option<EngineState>,
     pub output: Option<OutputState>,
+    pub text: Option<TextState>,
 }
 
 /// Build the inventory and, if `force_package_mode` is set, override the
@@ -125,6 +127,7 @@ impl App {
             models: None,
             engine: None,
             output: None,
+            text: None,
         }
     }
 
@@ -145,6 +148,9 @@ impl App {
             }
             Section::Output if self.output.is_none() => {
                 self.output = OutputState::load().ok();
+            }
+            Section::Text if self.text.is_none() => {
+                self.text = TextState::load().ok();
             }
             _ => {}
         }
