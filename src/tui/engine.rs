@@ -51,29 +51,55 @@ pub struct AllFields {
     // Parakeet
     pub pk_model_type: Option<String>, // "tdt", "ctc", or None for auto-detect
     pub pk_on_demand_loading: bool,
+    /// True if the [parakeet] table existed in the config at load time. We
+    /// only write back to it on save if either this is true or parakeet is
+    /// the active engine — otherwise saves leak partial tables that fail to
+    /// deserialize because `model` is required.
+    pub pk_section_existed: bool,
 
     // Moonshine
     pub mn_quantized: bool,
     pub mn_threads: Option<i64>,
     pub mn_on_demand_loading: bool,
+    pub mn_section_existed: bool,
 
     // SenseVoice
     pub sv_language: String,
     pub sv_use_itn: bool,
     pub sv_threads: Option<i64>,
     pub sv_on_demand_loading: bool,
+    pub sv_section_existed: bool,
 
     // Paraformer
     pub pf_threads: Option<i64>,
     pub pf_on_demand_loading: bool,
+    pub pf_section_existed: bool,
 
     // Dolphin
     pub dol_threads: Option<i64>,
     pub dol_on_demand_loading: bool,
+    pub dol_section_existed: bool,
 
     // Omnilingual
     pub om_threads: Option<i64>,
     pub om_on_demand_loading: bool,
+    pub om_section_existed: bool,
+}
+
+/// Default model name baked into voxtype for each ONNX engine. Used when we
+/// have to materialize a fresh `[engine]` table because the user just made it
+/// the active engine for the first time — those structs require `model` and
+/// the validator rejects a partial table.
+const fn default_model(engine: &str) -> &'static str {
+    match engine.as_bytes() {
+        b"parakeet" => "parakeet-tdt-0.6b-v3",
+        b"moonshine" => "base",
+        b"sensevoice" => "sensevoice-small",
+        b"paraformer" => "paraformer-zh",
+        b"dolphin" => "dolphin-base",
+        b"omnilingual" => "omnilingual-300m",
+        _ => "",
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -211,6 +237,7 @@ impl EngineState {
             pk_on_demand_loading: ed
                 .get_bool("parakeet", "on_demand_loading")
                 .unwrap_or(false),
+            pk_section_existed: ed.get_string("parakeet", "model").is_some(),
 
             // Moonshine
             mn_quantized: ed.get_bool("moonshine", "quantized").unwrap_or(true),
@@ -218,6 +245,7 @@ impl EngineState {
             mn_on_demand_loading: ed
                 .get_bool("moonshine", "on_demand_loading")
                 .unwrap_or(false),
+            mn_section_existed: ed.get_string("moonshine", "model").is_some(),
 
             // SenseVoice
             sv_language: ed
@@ -228,24 +256,28 @@ impl EngineState {
             sv_on_demand_loading: ed
                 .get_bool("sensevoice", "on_demand_loading")
                 .unwrap_or(false),
+            sv_section_existed: ed.get_string("sensevoice", "model").is_some(),
 
             // Paraformer
             pf_threads: ed.get_int("paraformer", "threads"),
             pf_on_demand_loading: ed
                 .get_bool("paraformer", "on_demand_loading")
                 .unwrap_or(false),
+            pf_section_existed: ed.get_string("paraformer", "model").is_some(),
 
             // Dolphin
             dol_threads: ed.get_int("dolphin", "threads"),
             dol_on_demand_loading: ed
                 .get_bool("dolphin", "on_demand_loading")
                 .unwrap_or(false),
+            dol_section_existed: ed.get_string("dolphin", "model").is_some(),
 
             // Omnilingual
             om_threads: ed.get_int("omnilingual", "threads"),
             om_on_demand_loading: ed
                 .get_bool("omnilingual", "on_demand_loading")
                 .unwrap_or(false),
+            om_section_existed: ed.get_string("omnilingual", "model").is_some(),
         };
         let mut state = Self {
             engine,
@@ -375,50 +407,83 @@ impl EngineState {
         ed.set_bool("whisper", "on_demand_loading", f.w_on_demand_loading);
         ed.set_bool("whisper", "gpu_isolation", f.w_gpu_isolation);
 
-        // Parakeet
-        match &f.pk_model_type {
-            Some(m) => ed.set_string("parakeet", "model_type", m),
-            None => ed.unset("parakeet", "model_type"),
+        // Parakeet — only touch the table if it already existed or the user
+        // is making it the active engine. If we're materializing a fresh
+        // [parakeet] table, also write the default model so the table is
+        // valid (model is required by ParakeetConfig).
+        if self.engine == "parakeet" || f.pk_section_existed {
+            if !f.pk_section_existed {
+                ed.set_string("parakeet", "model", default_model("parakeet"));
+            }
+            match &f.pk_model_type {
+                Some(m) => ed.set_string("parakeet", "model_type", m),
+                None => ed.unset("parakeet", "model_type"),
+            }
+            ed.set_bool("parakeet", "on_demand_loading", f.pk_on_demand_loading);
         }
-        ed.set_bool("parakeet", "on_demand_loading", f.pk_on_demand_loading);
 
         // Moonshine
-        ed.set_bool("moonshine", "quantized", f.mn_quantized);
-        match f.mn_threads {
-            Some(n) => ed.set_int("moonshine", "threads", n),
-            None => ed.unset("moonshine", "threads"),
+        if self.engine == "moonshine" || f.mn_section_existed {
+            if !f.mn_section_existed {
+                ed.set_string("moonshine", "model", default_model("moonshine"));
+            }
+            ed.set_bool("moonshine", "quantized", f.mn_quantized);
+            match f.mn_threads {
+                Some(n) => ed.set_int("moonshine", "threads", n),
+                None => ed.unset("moonshine", "threads"),
+            }
+            ed.set_bool("moonshine", "on_demand_loading", f.mn_on_demand_loading);
         }
-        ed.set_bool("moonshine", "on_demand_loading", f.mn_on_demand_loading);
 
         // SenseVoice
-        ed.set_string("sensevoice", "language", &f.sv_language);
-        ed.set_bool("sensevoice", "use_itn", f.sv_use_itn);
-        match f.sv_threads {
-            Some(n) => ed.set_int("sensevoice", "threads", n),
-            None => ed.unset("sensevoice", "threads"),
+        if self.engine == "sensevoice" || f.sv_section_existed {
+            if !f.sv_section_existed {
+                ed.set_string("sensevoice", "model", default_model("sensevoice"));
+            }
+            ed.set_string("sensevoice", "language", &f.sv_language);
+            ed.set_bool("sensevoice", "use_itn", f.sv_use_itn);
+            match f.sv_threads {
+                Some(n) => ed.set_int("sensevoice", "threads", n),
+                None => ed.unset("sensevoice", "threads"),
+            }
+            ed.set_bool("sensevoice", "on_demand_loading", f.sv_on_demand_loading);
         }
-        ed.set_bool("sensevoice", "on_demand_loading", f.sv_on_demand_loading);
 
         // Paraformer
-        match f.pf_threads {
-            Some(n) => ed.set_int("paraformer", "threads", n),
-            None => ed.unset("paraformer", "threads"),
+        if self.engine == "paraformer" || f.pf_section_existed {
+            if !f.pf_section_existed {
+                ed.set_string("paraformer", "model", default_model("paraformer"));
+            }
+            match f.pf_threads {
+                Some(n) => ed.set_int("paraformer", "threads", n),
+                None => ed.unset("paraformer", "threads"),
+            }
+            ed.set_bool("paraformer", "on_demand_loading", f.pf_on_demand_loading);
         }
-        ed.set_bool("paraformer", "on_demand_loading", f.pf_on_demand_loading);
 
         // Dolphin
-        match f.dol_threads {
-            Some(n) => ed.set_int("dolphin", "threads", n),
-            None => ed.unset("dolphin", "threads"),
+        if self.engine == "dolphin" || f.dol_section_existed {
+            if !f.dol_section_existed {
+                ed.set_string("dolphin", "model", default_model("dolphin"));
+            }
+            match f.dol_threads {
+                Some(n) => ed.set_int("dolphin", "threads", n),
+                None => ed.unset("dolphin", "threads"),
+            }
+            ed.set_bool("dolphin", "on_demand_loading", f.dol_on_demand_loading);
         }
-        ed.set_bool("dolphin", "on_demand_loading", f.dol_on_demand_loading);
 
         // Omnilingual
-        match f.om_threads {
-            Some(n) => ed.set_int("omnilingual", "threads", n),
-            None => ed.unset("omnilingual", "threads"),
+        if self.engine == "omnilingual" || f.om_section_existed {
+            if !f.om_section_existed {
+                ed.set_string("omnilingual", "model", default_model("omnilingual"));
+            }
+            match f.om_threads {
+                Some(n) => ed.set_int("omnilingual", "threads", n),
+                None => ed.unset("omnilingual", "threads"),
+            }
+            ed.set_bool("omnilingual", "on_demand_loading", f.om_on_demand_loading);
         }
-        ed.set_bool("omnilingual", "on_demand_loading", f.om_on_demand_loading);
 
         match ed.save() {
             Ok(()) => {
