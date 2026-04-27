@@ -6,11 +6,13 @@
 
 mod app;
 mod audio;
+mod common;
 mod config_editor;
 mod engine;
 mod general;
 mod hotkey;
 mod models_section;
+mod output_section;
 mod section;
 mod sidebar;
 mod stub;
@@ -181,6 +183,7 @@ fn handle_section_key(app: &mut App, key: KeyEvent) -> Action {
         Section::Audio => audio::handle_key(app, key),
         Section::Models => models_section::handle_key(app, key),
         Section::Engine => engine::handle_key(app, key),
+        Section::Output => output_section::handle_key(app, key),
         // Stub sections accept no input today.
         _ => Action::None,
     }
@@ -241,6 +244,7 @@ fn render_section(f: &mut Frame, area: Rect, app: &App) {
         Section::Audio => audio::render(f, area, app),
         Section::Models => models_section::render(f, area, app),
         Section::Engine => engine::render(f, area, app),
+        Section::Output => output_section::render(f, area, app),
         other => stub::render(f, area, other),
     }
 }

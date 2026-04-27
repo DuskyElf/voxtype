@@ -7,6 +7,7 @@ use super::audio::AudioState;
 use super::engine::EngineState;
 use super::hotkey::HotkeyState;
 use super::models_section::ModelsState;
+use super::output_section::OutputState;
 use super::section::Section;
 
 /// What the event handler asks the run-loop to do next.
@@ -58,6 +59,7 @@ pub struct App {
     pub audio: Option<AudioState>,
     pub models: Option<ModelsState>,
     pub engine: Option<EngineState>,
+    pub output: Option<OutputState>,
 }
 
 /// Build the inventory and, if `force_package_mode` is set, override the
@@ -122,6 +124,7 @@ impl App {
             audio: None,
             models: None,
             engine: None,
+            output: None,
         }
     }
 
@@ -139,6 +142,9 @@ impl App {
             }
             Section::Engine if self.engine.is_none() => {
                 self.engine = EngineState::load().ok();
+            }
+            Section::Output if self.output.is_none() => {
+                self.output = OutputState::load().ok();
             }
             _ => {}
         }
