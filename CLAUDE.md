@@ -340,12 +340,17 @@ Based on open issues and project direction:
 - **Eager input processing** ([#70](https://github.com/peteonrails/voxtype/issues/70)) - Start transcription while still recording
 
 **Exploratory:**
-- **Consolidated release binaries** - Reduce from 7 binaries to 3 (cpu, cuda, rocm) by combining Whisper + Vulkan + Parakeet into each binary. Vulkan and CUDA/ROCm fall back to CPU when no GPU is present, and ONNX Runtime (Parakeet) does runtime CPU dispatch. The trade-off is losing AVX-512 Whisper performance (~10-30%) and larger binaries (~35-40 MB vs 8 MB). Blocked on whisper.cpp/ggml adding runtime SIMD dispatch if AVX-512 performance must be preserved; otherwise, AVX2-only Whisper is safe on all x86-64 CPUs.
+- **Consolidated release binaries** - Reduce from 7 binaries to 3 (cpu, cuda, migraphx) by combining Whisper + Vulkan + Parakeet into each binary. Vulkan and CUDA/MIGraphX fall back to CPU when no GPU is present, and ONNX Runtime (Parakeet) does runtime CPU dispatch. The trade-off is losing AVX-512 Whisper performance (~10-30%) and larger binaries (~35-40 MB vs 8 MB). Blocked on whisper.cpp/ggml adding runtime SIMD dispatch if AVX-512 performance must be preserved; otherwise, AVX2-only Whisper is safe on all x86-64 CPUs.
 - **Nemotron Speech backend** ([#47](https://github.com/peteonrails/voxtype/issues/47)) - Alternative ASR engine
 - **Foreign exception handling** ([#30](https://github.com/peteonrails/voxtype/issues/30)) - Investigate whisper.cpp crash recovery
 
 **Blocked/Waiting:**
-- **Parakeet MIGraphX acceleration** - When parakeet-rs 0.3.0 releases on crates.io, update AMD GPU builds to use MIGraphX instead of ROCm. The current ROCm EP has upstream ONNX Runtime compatibility issues. Consider renaming `parakeet-rocm` feature to `parakeet-migraphx`. Also check nixpkgs onnxruntime for MIGraphX support options.
+<!-- Parakeet MIGraphX acceleration completed in v0.7.0: feature renamed to
+     parakeet-migraphx, binary renamed to voxtype-onnx-migraphx, parakeet-rs
+     bumped to 0.3.5. Compat symlink voxtype-onnx-rocm → voxtype-onnx-migraphx
+     ships through v0.7.x and is removed in v0.8.0. -->
+
+- **Nixpkgs onnxruntime MIGraphX support** - Verify the nixpkgs `onnxruntime` build (with `rocmSupport = true`) actually exposes the MIGraphX EP. The Nix flake's `parakeet-migraphx` output uses `onnxruntimeRocm` and sets `ORT_MIGRAPHX_MODEL_CACHE_PATH`; if MIGraphX isn't exposed in nixpkgs, ORT will fail to register the EP at runtime.
 
 ### Non-Goals
 
@@ -418,7 +423,7 @@ Building on hosts with newer glibc (e.g. 2.43 on CachyOS/Arch) can produce binar
 
 ### Build Strategy
 
-**CRITICAL: Every binary must be built in Docker.** Never build release binaries directly on the host, even for AVX-512 or ROCm builds that require specific hardware. Run Docker locally on the machine with the required hardware instead.
+**CRITICAL: Every binary must be built in Docker.** Never build release binaries directly on the host, even for AVX-512 or MIGraphX builds that require specific hardware. Run Docker locally on the machine with the required hardware instead.
 
 **Whisper Binaries:**
 
@@ -435,7 +440,7 @@ Building on hosts with newer glibc (e.g. 2.43 on CachyOS/Arch) can produce binar
 | onnx-avx2 | `Dockerfile.onnx` | Remote (pre-AVX-512) | Ubuntu 24.04 | 2.39 |
 | onnx-avx512 | `Dockerfile.onnx-avx512` | Local (AVX-512 host) | Ubuntu 24.04 | 2.39 |
 | onnx-cuda | `Dockerfile.onnx-cuda` | Remote (NVIDIA GPU) | Ubuntu 24.04 | 2.39 |
-| onnx-rocm | `Dockerfile.onnx-rocm` | Local (AMD GPU host) | Ubuntu 24.04 | 2.39 |
+| onnx-migraphx | `Dockerfile.onnx-migraphx` | Local (AMD GPU host) | Ubuntu 24.04 | 2.39 |
 
 Note: ONNX binaries include bundled ONNX Runtime which contains AVX-512 instructions, but ONNX Runtime uses runtime CPU detection and falls back gracefully on older CPUs.
 
@@ -503,16 +508,16 @@ docker run --rm -v $(pwd)/releases/${VERSION}:/test ubuntu:24.04 ls /test  # ver
 # Use tar pipe to copy from remote Docker volume:
 docker run --rm -v $(pwd)/releases/${VERSION}:/src ubuntu:24.04 tar -cf - -C /src . | tar -xf - -C releases/${VERSION}/
 
-# 4. Build AVX-512 + ROCm binaries locally IN DOCKER (caps glibc at container version)
+# 4. Build AVX-512 + MIGraphX binaries locally IN DOCKER (caps glibc at container version)
 docker context use <your-local-context>
 
 # Whisper AVX-512 + ONNX AVX-512 (requires AVX-512 capable host)
 docker compose -f docker-compose.build.yml --profile avx512 build --no-cache avx512 onnx-avx512
 docker compose -f docker-compose.build.yml --profile avx512 up avx512 onnx-avx512
 
-# ONNX ROCm (requires AMD GPU host)
-docker compose -f docker-compose.build.yml build --no-cache onnx-rocm
-docker compose -f docker-compose.build.yml up onnx-rocm
+# ONNX MIGraphX (requires AMD GPU host)
+docker compose -f docker-compose.build.yml build --no-cache onnx-migraphx
+docker compose -f docker-compose.build.yml up onnx-migraphx
 
 # 5. VERIFY VERSIONS before uploading (critical!)
 for bin in releases/${VERSION}/voxtype-*; do
@@ -537,7 +542,7 @@ releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-vulkan --version
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-avx2 --version
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-avx512 --version
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-cuda --version
-releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-rocm --version
+releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-migraphx --version
 ```
 
 If versions don't match, the Docker cache is stale. Rebuild with `--no-cache`.
@@ -591,7 +596,7 @@ done
 | onnx-avx2 | Ubuntu 24.04 | 2.39 |
 | onnx-avx512 | Ubuntu 24.04 | 2.39 |
 | onnx-cuda | Ubuntu 24.04 | 2.39 |
-| onnx-rocm | Ubuntu 24.04 | 2.39 |
+| onnx-migraphx | Ubuntu 24.04 | 2.39 |
 
 If any binary exceeds its expected glibc version, it was likely built outside Docker. Rebuild it in the appropriate Docker container.
 

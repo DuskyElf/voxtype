@@ -88,11 +88,11 @@ services:
     environment:
       - VERSION=${VERSION:-0.6.2}
 
-  # ONNX ROCm build (AMD GPU acceleration, requires AMD GPU host)
-  onnx-rocm:
+  # ONNX MIGraphX build (AMD GPU acceleration, requires AMD GPU host)
+  onnx-migraphx:
     build:
       context: .
-      dockerfile: Dockerfile.onnx-rocm
+      dockerfile: Dockerfile.onnx-migraphx
       args:
         VERSION: ${VERSION:-0.6.2}
     volumes:

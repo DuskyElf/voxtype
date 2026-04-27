@@ -17,7 +17,7 @@ pub enum ParakeetBackend {
     Avx2,
     Avx512,
     Cuda,
-    Rocm,
+    Migraphx,
     /// Custom binary (source-compiled without specific suffix)
     Custom,
 }
@@ -28,7 +28,7 @@ impl ParakeetBackend {
             ParakeetBackend::Avx2 => "voxtype-onnx-avx2",
             ParakeetBackend::Avx512 => "voxtype-onnx-avx512",
             ParakeetBackend::Cuda => "voxtype-onnx-cuda",
-            ParakeetBackend::Rocm => "voxtype-onnx-rocm",
+            ParakeetBackend::Migraphx => "voxtype-onnx-migraphx",
             ParakeetBackend::Custom => "voxtype-onnx",
         }
     }
@@ -38,7 +38,7 @@ impl ParakeetBackend {
             ParakeetBackend::Avx2 => "ONNX (AVX2)",
             ParakeetBackend::Avx512 => "ONNX (AVX-512)",
             ParakeetBackend::Cuda => "ONNX (CUDA)",
-            ParakeetBackend::Rocm => "ONNX (ROCm)",
+            ParakeetBackend::Migraphx => "ONNX (MIGraphX)",
             ParakeetBackend::Custom => "ONNX (Custom)",
         }
     }
@@ -48,7 +48,7 @@ impl ParakeetBackend {
             ParakeetBackend::Avx2 => "voxtype-avx2",
             ParakeetBackend::Avx512 => "voxtype-avx512",
             ParakeetBackend::Cuda => "voxtype-vulkan", // CUDA users likely have GPU, fall back to vulkan
-            ParakeetBackend::Rocm => "voxtype-vulkan", // ROCm users have AMD GPU, fall back to vulkan
+            ParakeetBackend::Migraphx => "voxtype-vulkan", // AMD GPU users fall back to vulkan
             ParakeetBackend::Custom => "voxtype-native", // Source builds: natively compiled, no CPU tier
         }
     }
@@ -75,14 +75,16 @@ pub fn detect_current_parakeet_backend() -> Option<ParakeetBackend> {
             "voxtype-onnx-avx2" => Some(ParakeetBackend::Avx2),
             "voxtype-onnx-avx512" => Some(ParakeetBackend::Avx512),
             "voxtype-onnx-cuda" => Some(ParakeetBackend::Cuda),
-            "voxtype-onnx-rocm" => Some(ParakeetBackend::Rocm),
+            "voxtype-onnx-migraphx" => Some(ParakeetBackend::Migraphx),
             "voxtype-onnx" => Some(ParakeetBackend::Custom),
             // Legacy parakeet names (backward compat)
             "voxtype-parakeet-avx2" => Some(ParakeetBackend::Avx2),
             "voxtype-parakeet-avx512" => Some(ParakeetBackend::Avx512),
             "voxtype-parakeet-cuda" => Some(ParakeetBackend::Cuda),
-            "voxtype-parakeet-rocm" => Some(ParakeetBackend::Rocm),
             "voxtype-parakeet" => Some(ParakeetBackend::Custom),
+            // Legacy ROCm names (renamed to MIGraphX in v0.7.0; symlink shipped one release for compat)
+            "voxtype-onnx-rocm" => Some(ParakeetBackend::Migraphx),
+            "voxtype-parakeet-rocm" => Some(ParakeetBackend::Migraphx),
             _ => None,
         };
     }
@@ -112,7 +114,7 @@ pub fn detect_available_backends() -> Vec<ParakeetBackend> {
         ParakeetBackend::Avx2,
         ParakeetBackend::Avx512,
         ParakeetBackend::Cuda,
-        ParakeetBackend::Rocm,
+        ParakeetBackend::Migraphx,
         ParakeetBackend::Custom,
     ] {
         let path = Path::new(VOXTYPE_LIB_DIR).join(backend.binary_name());
@@ -143,11 +145,11 @@ fn detect_best_parakeet_backend() -> Option<ParakeetBackend> {
         return Some(ParakeetBackend::Cuda);
     }
 
-    // Prefer ROCm if available and AMD GPU detected.
-    // The ROCm binary bundles ONNX Runtime which contains AVX-512 instructions,
+    // Prefer MIGraphX if available and AMD GPU detected.
+    // The MIGraphX binary bundles ONNX Runtime which contains AVX-512 instructions,
     // so only select it if the CPU supports AVX-512.
-    if available.contains(&ParakeetBackend::Rocm) && detect_amd_gpu() && has_avx512 {
-        return Some(ParakeetBackend::Rocm);
+    if available.contains(&ParakeetBackend::Migraphx) && detect_amd_gpu() && has_avx512 {
+        return Some(ParakeetBackend::Migraphx);
     }
 
     // Check for AVX-512 CPU-only backend
@@ -298,7 +300,7 @@ pub fn show_status() {
             ParakeetBackend::Avx2,
             ParakeetBackend::Avx512,
             ParakeetBackend::Cuda,
-            ParakeetBackend::Rocm,
+            ParakeetBackend::Migraphx,
             ParakeetBackend::Custom,
         ] {
             let installed = available.contains(&backend);
@@ -316,7 +318,7 @@ pub fn show_status() {
         }
     }
 
-    // GPU detection for CUDA/ROCm
+    // GPU detection for CUDA/MIGraphX
     println!();
     let has_nvidia = detect_nvidia_gpu();
     let has_amd = detect_amd_gpu();
@@ -334,7 +336,7 @@ pub fn show_status() {
         println!("GPU: not detected");
     }
     if (has_nvidia || has_amd) && !has_avx512 {
-        println!("\nNote: ONNX GPU binaries (CUDA/ROCm) require AVX-512 CPU support.");
+        println!("\nNote: ONNX GPU binaries (CUDA/MIGraphX) require AVX-512 CPU support.");
         println!("  Your CPU supports AVX2 only. Use ONNX (AVX2) for CPU-based inference,");
         println!("  or use the Whisper engine with Vulkan for GPU acceleration.");
     }
@@ -462,7 +464,10 @@ mod tests {
         assert_eq!(ParakeetBackend::Avx2.binary_name(), "voxtype-onnx-avx2");
         assert_eq!(ParakeetBackend::Avx512.binary_name(), "voxtype-onnx-avx512");
         assert_eq!(ParakeetBackend::Cuda.binary_name(), "voxtype-onnx-cuda");
-        assert_eq!(ParakeetBackend::Rocm.binary_name(), "voxtype-onnx-rocm");
+        assert_eq!(
+            ParakeetBackend::Migraphx.binary_name(),
+            "voxtype-onnx-migraphx"
+        );
         assert_eq!(ParakeetBackend::Custom.binary_name(), "voxtype-onnx");
     }
 
@@ -471,7 +476,7 @@ mod tests {
         assert_eq!(ParakeetBackend::Avx2.display_name(), "ONNX (AVX2)");
         assert_eq!(ParakeetBackend::Avx512.display_name(), "ONNX (AVX-512)");
         assert_eq!(ParakeetBackend::Cuda.display_name(), "ONNX (CUDA)");
-        assert_eq!(ParakeetBackend::Rocm.display_name(), "ONNX (ROCm)");
+        assert_eq!(ParakeetBackend::Migraphx.display_name(), "ONNX (MIGraphX)");
         assert_eq!(ParakeetBackend::Custom.display_name(), "ONNX (Custom)");
     }
 
@@ -483,7 +488,10 @@ mod tests {
             "voxtype-avx512"
         );
         assert_eq!(ParakeetBackend::Cuda.whisper_equivalent(), "voxtype-vulkan");
-        assert_eq!(ParakeetBackend::Rocm.whisper_equivalent(), "voxtype-vulkan");
+        assert_eq!(
+            ParakeetBackend::Migraphx.whisper_equivalent(),
+            "voxtype-vulkan"
+        );
         assert_eq!(
             ParakeetBackend::Custom.whisper_equivalent(),
             "voxtype-native"

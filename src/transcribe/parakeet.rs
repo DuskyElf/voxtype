@@ -12,7 +12,7 @@ use crate::config::{ParakeetConfig, ParakeetModelType};
 use crate::error::TranscribeError;
 #[cfg(any(
     feature = "parakeet-cuda",
-    feature = "parakeet-rocm",
+    feature = "parakeet-migraphx",
     feature = "parakeet-tensorrt"
 ))]
 use parakeet_rs::ExecutionProvider;
@@ -310,7 +310,7 @@ fn build_execution_config() -> Option<ExecutionConfig> {
         return None;
     }
 
-    #[cfg(feature = "parakeet-rocm")]
+    #[cfg(feature = "parakeet-migraphx")]
     {
         tracing::info!("Configuring MIGraphX execution provider for AMD GPU acceleration");
         return Some(ExecutionConfig::new().with_execution_provider(ExecutionProvider::MIGraphX));
@@ -319,7 +319,7 @@ fn build_execution_config() -> Option<ExecutionConfig> {
     #[cfg(not(any(
         feature = "parakeet-cuda",
         feature = "parakeet-tensorrt",
-        feature = "parakeet-rocm"
+        feature = "parakeet-migraphx"
     )))]
     {
         None

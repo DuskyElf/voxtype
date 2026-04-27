@@ -188,14 +188,14 @@ model = "parakeet-tdt-0.6b-v3-int8"
 - Best accuracy for English (~6% WER, top of HuggingFace ASR leaderboard)
 - Built-in punctuation and capitalization (TDT)
 - Fast even on CPU thanks to efficient FastConformer architecture
-- GPU acceleration via CUDA, ROCm, or TensorRT
+- GPU acceleration via CUDA, MIGraphX, or TensorRT
 
 **Cons:**
 - Limited to 25 European languages (no CJK, Arabic, Hindi, etc.)
 - Requires ONNX binary
 - Only one model size (0.6B parameters)
 
-**GPU builds:** The ONNX binary variants include GPU support. `onnx-cuda` for NVIDIA, `onnx-rocm` for AMD.
+**GPU builds:** The ONNX binary variants include GPU support. `onnx-cuda` for NVIDIA, `onnx-migraphx` for AMD.
 
 ---
 

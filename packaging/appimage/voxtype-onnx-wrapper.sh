@@ -67,9 +67,12 @@ if [ -x "$VOXTYPE_LIB/voxtype-onnx-avx2" ]; then
     exec "$VOXTYPE_LIB/voxtype-onnx-avx2" "$@"
 fi
 
-# Single ONNX binary (CUDA or ROCm AppImage)
+# Single ONNX binary (CUDA or MIGraphX AppImage)
 if [ -x "$VOXTYPE_LIB/voxtype-onnx-cuda" ]; then
     exec "$VOXTYPE_LIB/voxtype-onnx-cuda" "$@"
+fi
+if [ -x "$VOXTYPE_LIB/voxtype-onnx-migraphx" ]; then
+    exec "$VOXTYPE_LIB/voxtype-onnx-migraphx" "$@"
 fi
 
 echo "Error: No voxtype binary found in $VOXTYPE_LIB" >&2

@@ -67,10 +67,10 @@
           "omnilingual-cuda"
         ];
 
-        # Only Parakeet has ROCm support; other engines run on CPU
-        onnxRocmFeatures = [
+        # Only Parakeet has AMD GPU support (via MIGraphX); other engines run on CPU
+        onnxMigraphxFeatures = [
           "parakeet-load-dynamic"
-          "parakeet-rocm"
+          "parakeet-migraphx"
           "moonshine"
           "sensevoice"
           "paraformer"
@@ -263,12 +263,12 @@
           ORT_LIB_LOCATION = "${onnxruntimeCuda}/lib";
         });
 
-        # Build the ONNX + ROCm variant for AMD GPUs
-        # Only Parakeet gets ROCm acceleration; other engines run on CPU
-        onnxRocmUnwrapped = let
+        # Build the ONNX + MIGraphX variant for AMD GPUs
+        # Only Parakeet gets AMD GPU acceleration; other engines run on CPU
+        onnxMigraphxUnwrapped = let
           pkg = mkVoxtypeUnwrapped {
-            pname = "voxtype-onnx-rocm";
-            features = onnxRocmFeatures;
+            pname = "voxtype-onnx-migraphx";
+            features = onnxMigraphxFeatures;
             extraNativeBuildInputs = with pkgs; [
               rocmPackages.clr
             ];
@@ -294,12 +294,15 @@
           # Paraformer, Dolphin, Omnilingual)
           onnx = wrapOnnx { pkg = onnxUnwrapped; };
           onnx-cuda = wrapOnnx { onnxruntime = onnxruntimeCuda; pkg = onnxCudaUnwrapped; };
-          onnx-rocm = wrapOnnx { onnxruntime = onnxruntimeRocm; pkg = onnxRocmUnwrapped; extraWrapperArgs = migraphxWrapperArgs; };
+          onnx-migraphx = wrapOnnx { onnxruntime = onnxruntimeRocm; pkg = onnxMigraphxUnwrapped; extraWrapperArgs = migraphxWrapperArgs; };
 
-          # Backwards-compatible aliases (parakeet → onnx)
+          # Backwards-compatible aliases (parakeet → onnx, rocm → migraphx)
           parakeet = wrapOnnx { pkg = onnxUnwrapped; };
           parakeet-cuda = wrapOnnx { onnxruntime = onnxruntimeCuda; pkg = onnxCudaUnwrapped; };
-          parakeet-rocm = wrapOnnx { onnxruntime = onnxruntimeRocm; pkg = onnxRocmUnwrapped; extraWrapperArgs = migraphxWrapperArgs; };
+          parakeet-migraphx = wrapOnnx { onnxruntime = onnxruntimeRocm; pkg = onnxMigraphxUnwrapped; extraWrapperArgs = migraphxWrapperArgs; };
+          # Legacy: rocm → migraphx (drop in v0.8.0)
+          onnx-rocm = wrapOnnx { onnxruntime = onnxruntimeRocm; pkg = onnxMigraphxUnwrapped; extraWrapperArgs = migraphxWrapperArgs; };
+          parakeet-rocm = wrapOnnx { onnxruntime = onnxruntimeRocm; pkg = onnxMigraphxUnwrapped; extraWrapperArgs = migraphxWrapperArgs; };
 
           # Unwrapped packages (for custom wrapping scenarios)
           voxtype-unwrapped = mkVoxtypeUnwrapped {};
@@ -307,12 +310,15 @@
           voxtype-rocm-unwrapped = rocmUnwrapped;
           voxtype-onnx-unwrapped = onnxUnwrapped;
           voxtype-onnx-cuda-unwrapped = onnxCudaUnwrapped;
-          voxtype-onnx-rocm-unwrapped = onnxRocmUnwrapped;
+          voxtype-onnx-migraphx-unwrapped = onnxMigraphxUnwrapped;
 
           # Backwards-compatible aliases
           voxtype-parakeet-unwrapped = onnxUnwrapped;
           voxtype-parakeet-cuda-unwrapped = onnxCudaUnwrapped;
-          voxtype-parakeet-rocm-unwrapped = onnxRocmUnwrapped;
+          voxtype-parakeet-migraphx-unwrapped = onnxMigraphxUnwrapped;
+          # Legacy
+          voxtype-onnx-rocm-unwrapped = onnxMigraphxUnwrapped;
+          voxtype-parakeet-rocm-unwrapped = onnxMigraphxUnwrapped;
         };
 
         # Development shell with all dependencies

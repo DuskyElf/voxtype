@@ -399,9 +399,13 @@ if [[ "$TARGET_ARCH" == "x86_64" ]]; then
         cp "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-cuda" "$STAGING/usr/lib/voxtype/voxtype-onnx-cuda"
         chmod 755 "$STAGING/usr/lib/voxtype/voxtype-onnx-cuda"
     fi
-    if [[ -f "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-rocm" ]]; then
-        cp "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-rocm" "$STAGING/usr/lib/voxtype/voxtype-onnx-rocm"
-        chmod 755 "$STAGING/usr/lib/voxtype/voxtype-onnx-rocm"
+    if [[ -f "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-migraphx" ]]; then
+        cp "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-migraphx" "$STAGING/usr/lib/voxtype/voxtype-onnx-migraphx"
+        chmod 755 "$STAGING/usr/lib/voxtype/voxtype-onnx-migraphx"
+        # Compatibility symlink for users with scripts referencing the old name.
+        # The AMD GPU EP changed from ROCm to MIGraphX in v0.7.0; ship one
+        # release with both names to soften the transition. Drop in v0.8.0.
+        ln -sf voxtype-onnx-migraphx "$STAGING/usr/lib/voxtype/voxtype-onnx-rocm"
     fi
 
     # Install wrapper script as /usr/bin/voxtype

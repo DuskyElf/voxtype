@@ -523,7 +523,8 @@ pub fn show_status() {
                 "voxtype-onnx-avx2" | "voxtype-parakeet-avx2" => "ONNX CPU (AVX2)",
                 "voxtype-onnx-avx512" | "voxtype-parakeet-avx512" => "ONNX CPU (AVX-512)",
                 "voxtype-onnx-cuda" | "voxtype-parakeet-cuda" => "ONNX GPU (CUDA)",
-                "voxtype-onnx-rocm" | "voxtype-parakeet-rocm" => "ONNX GPU (ROCm)",
+                "voxtype-onnx-migraphx" => "ONNX GPU (MIGraphX)",
+                "voxtype-onnx-rocm" | "voxtype-parakeet-rocm" => "ONNX GPU (MIGraphX, legacy name)",
                 _ => "ONNX (unknown variant)",
             };
             println!("Active backend: {}", display_name);
@@ -576,7 +577,7 @@ pub fn show_status() {
             ("voxtype-onnx-avx2", "voxtype-parakeet-avx2", "ONNX CPU (AVX2)"),
             ("voxtype-onnx-avx512", "voxtype-parakeet-avx512", "ONNX CPU (AVX-512)"),
             ("voxtype-onnx-cuda", "voxtype-parakeet-cuda", "ONNX GPU (CUDA)"),
-            ("voxtype-onnx-rocm", "voxtype-parakeet-rocm", "ONNX GPU (ROCm)"),
+            ("voxtype-onnx-migraphx", "voxtype-onnx-rocm", "ONNX GPU (MIGraphX)"),
         ];
 
         // Get current symlink target
@@ -685,7 +686,7 @@ pub fn show_status() {
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
         let is_gpu_active = current_target
             .as_ref()
-            .map(|t| t.contains("cuda") || t.contains("rocm"))
+            .map(|t| t.contains("cuda") || t.contains("migraphx") || t.contains("rocm"))
             .unwrap_or(false);
 
         if !is_gpu_active && detect_best_parakeet_gpu_backend().is_some() {
@@ -708,7 +709,7 @@ pub fn show_status() {
 fn detect_best_parakeet_gpu_backend() -> Option<(&'static str, &'static str)> {
     let gpus = detect_gpus();
 
-    // The CUDA and ROCm binaries bundle ONNX Runtime which contains AVX-512
+    // The CUDA and MIGraphX binaries bundle ONNX Runtime which contains AVX-512
     // instructions. On CPUs without AVX-512 (e.g., Zen 3), these binaries will
     // crash with SIGILL. Only select GPU backends if the CPU supports AVX-512.
     let has_avx512 = fs::read_to_string("/proc/cpuinfo")
@@ -731,11 +732,11 @@ fn detect_best_parakeet_gpu_backend() -> Option<(&'static str, &'static str)> {
             }
         };
 
-    // Check for AMD GPU and ROCm binary
+    // Check for AMD GPU and MIGraphX binary (legacy "rocm" name accepted via symlink)
     let has_amd = gpus.iter().any(|g| g.vendor == GpuVendor::Amd);
-    if let Some(binary) = find_binary("voxtype-onnx-rocm", "voxtype-parakeet-rocm") {
+    if let Some(binary) = find_binary("voxtype-onnx-migraphx", "voxtype-onnx-rocm") {
         if has_amd {
-            return Some((binary, "ROCm"));
+            return Some((binary, "MIGraphX"));
         }
     }
 
@@ -748,8 +749,8 @@ fn detect_best_parakeet_gpu_backend() -> Option<(&'static str, &'static str)> {
     }
 
     // Fall back to whichever is installed (user may have external GPU)
-    if let Some(binary) = find_binary("voxtype-onnx-rocm", "voxtype-parakeet-rocm") {
-        return Some((binary, "ROCm"));
+    if let Some(binary) = find_binary("voxtype-onnx-migraphx", "voxtype-onnx-rocm") {
+        return Some((binary, "MIGraphX"));
     }
     if let Some(binary) = find_binary("voxtype-onnx-cuda", "voxtype-parakeet-cuda") {
         return Some((binary, "CUDA"));
@@ -758,13 +759,13 @@ fn detect_best_parakeet_gpu_backend() -> Option<(&'static str, &'static str)> {
     None
 }
 
-/// Enable GPU backend (engine-aware: Vulkan for Whisper, CUDA/ROCm for Parakeet)
+/// Enable GPU backend (engine-aware: Vulkan for Whisper, CUDA/MIGraphX for Parakeet)
 pub fn enable() -> anyhow::Result<()> {
     // Check which engine is active by looking at the current symlink
     let is_parakeet = is_parakeet_binary_active();
 
     if is_parakeet {
-        // Parakeet mode: switch to best available GPU backend (CUDA or ROCm)
+        // Parakeet mode: switch to best available GPU backend (CUDA or MIGraphX)
         let (backend_binary, backend_name) = detect_best_parakeet_gpu_backend().ok_or_else(|| {
             let gpus = detect_gpus();
             let has_amd = gpus.iter().any(|g| g.vendor == GpuVendor::Amd);
@@ -774,18 +775,18 @@ pub fn enable() -> anyhow::Result<()> {
                 .unwrap_or(false);
 
             let hint = if (has_amd || has_nvidia) && !has_avx512 {
-                "You have a GPU, but the ONNX GPU binaries (CUDA/ROCm) require a CPU with \
+                "You have a GPU, but the ONNX GPU binaries (CUDA/MIGraphX) require a CPU with \
                  AVX-512 support. Your CPU only supports AVX2.\n\n\
                  Use ONNX on CPU instead:\n  \
                  sudo ln -sf /usr/lib/voxtype/voxtype-onnx-avx2 /usr/bin/voxtype\n\n\
                  Or use the Whisper engine with Vulkan GPU acceleration:\n  \
                  voxtype setup onnx --disable && sudo voxtype setup gpu --enable"
             } else if has_amd {
-                "You have an AMD GPU. Install voxtype-onnx-rocm for GPU acceleration."
+                "You have an AMD GPU. Install voxtype-onnx-migraphx for GPU acceleration."
             } else if has_nvidia {
                 "You have an NVIDIA GPU. Install voxtype-onnx-cuda for GPU acceleration."
             } else {
-                "No supported GPU detected. ONNX GPU acceleration requires NVIDIA (CUDA) or AMD (ROCm)."
+                "No supported GPU detected. ONNX GPU acceleration requires NVIDIA (CUDA) or AMD (MIGraphX)."
             };
 
             anyhow::anyhow!(
