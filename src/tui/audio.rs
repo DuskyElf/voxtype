@@ -403,7 +403,7 @@ fn render_bottom_hint(f: &mut Frame, area: Rect, state: &AudioState) {
     let line = Line::from(vec![
         Span::styled(
             " ↑↓ field   ←→ change   s save   r revert ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         ),
         dirty_marker,
     ]);

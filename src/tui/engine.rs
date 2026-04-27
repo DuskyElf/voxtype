@@ -258,7 +258,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
             Line::from(""),
             Line::from(Span::styled(
                 "Edit ~/.config/voxtype/config.toml directly for now.",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::Gray),
             )),
         ];
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
@@ -430,7 +430,7 @@ fn render_hint(f: &mut Frame, area: Rect, state: &EngineState) {
     let line = Line::from(vec![
         Span::styled(
             " ↑↓ field   ←→ change   s save   r revert ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         ),
         dirty_marker,
     ]);

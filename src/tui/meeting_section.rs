@@ -164,7 +164,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Line::from(Span::styled(
             "Edit chunk size, summary, and per-speaker config in [meeting.*] in \
              config.toml directly.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         )),
     ];
     f.render_widget(Paragraph::new(help).wrap(Wrap { trim: true }), chunks[3]);

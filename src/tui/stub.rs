@@ -24,7 +24,7 @@ pub fn render(f: &mut Frame, area: Rect, section: Section) {
         )),
         Line::from(Span::styled(
             section.summary(),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         )),
         Line::from(""),
         Line::from("Coming soon."),

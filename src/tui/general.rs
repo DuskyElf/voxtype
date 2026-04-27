@@ -123,7 +123,7 @@ fn render_info(f: &mut Frame, area: Rect, app: &App) {
             Span::raw("Recommended:   "),
             Span::styled("★ ", Style::default().fg(Color::Cyan)),
             Span::styled(recommended, Style::default().fg(Color::Cyan)),
-            Span::styled("   (Whisper / ONNX)", Style::default().fg(Color::DarkGray)),
+            Span::styled("   (Whisper / ONNX)", Style::default().fg(Color::Gray)),
         ]),
         Line::from(format!(
             "CPU:           AVX2={}  AVX-512={}",
@@ -263,7 +263,7 @@ fn variant_hint_lines<'a>(variant: Variant, app: &App) -> Vec<Line<'a>> {
         )),
         Some(s) if !s.installed => Line::from(Span::styled(
             "· Not installed on this system",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         )),
         Some(s) if !s.runs_on_this_cpu => Line::from(Span::styled(
             "⚠ Won't run: CPU lacks required instructions",
@@ -318,15 +318,15 @@ fn variant_hint_lines<'a>(variant: Variant, app: &App) -> Vec<Line<'a>> {
         lines.push(Line::from(""));
     }
     lines.push(Line::from(vec![
-        Span::styled("Models:    ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Models:    ", Style::default().fg(Color::Gray)),
         Span::raw(hint.models.to_string()),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("Speed:     ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Speed:     ", Style::default().fg(Color::Gray)),
         Span::raw(hint.speed.to_string()),
     ]));
     lines.push(Line::from(vec![
-        Span::styled("Hardware:  ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Hardware:  ", Style::default().fg(Color::Gray)),
         Span::raw(hint.hardware.to_string()),
     ]));
 
@@ -343,22 +343,22 @@ fn variant_hint_lines<'a>(variant: Variant, app: &App) -> Vec<Line<'a>> {
                 .add_modifier(Modifier::BOLD),
         )));
         lines.push(Line::from(vec![
-            Span::styled("  English:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  English:   ", Style::default().fg(Color::Gray)),
             Span::raw(models.english.to_string()),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  European:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  European:  ", Style::default().fg(Color::Gray)),
             Span::raw(models.european.to_string()),
         ]));
         lines.push(Line::from(vec![
-            Span::styled("  Asian:     ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Asian:     ", Style::default().fg(Color::Gray)),
             Span::raw(models.asian.to_string()),
         ]));
         if let Some(note) = models.note {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 note.to_string(),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::Gray),
             )));
         }
     }
@@ -391,7 +391,7 @@ fn na_hint_lines<'a>(row: usize, col: usize) -> Vec<Line<'a>> {
         Line::from(Span::styled(
             "Not applicable",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(Color::Gray)
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
@@ -617,7 +617,7 @@ fn render_legend(f: &mut Frame, area: Rect) {
 fn render_help(f: &mut Frame, area: Rect) {
     let line = Line::from(Span::styled(
         " ↑↓←→ navigate matrix   Enter switch   r refresh ",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(Color::Gray),
     ));
     f.render_widget(Paragraph::new(line), area);
 }

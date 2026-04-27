@@ -181,7 +181,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(Span::styled(
             "  Run `voxtype setup vad` to download the Silero VAD model.",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         )),
     ];
     f.render_widget(Paragraph::new(help).wrap(Wrap { trim: true }), chunks[3]);

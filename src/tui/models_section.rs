@@ -276,7 +276,7 @@ fn render_list(f: &mut Frame, area: Rect, state: &ModelsState) {
             Line::from(""),
             Line::from(Span::styled(
                 "  Run `voxtype setup model` to download.",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(Color::Gray),
             )),
         ];
         f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), area);
@@ -296,7 +296,7 @@ fn render_list(f: &mut Frame, area: Rect, state: &ModelsState) {
             } else if *installed {
                 Span::styled("✓ ", Style::default().fg(Color::Cyan))
             } else {
-                Span::styled("· ", Style::default().fg(Color::DarkGray))
+                Span::styled("· ", Style::default().fg(Color::Gray))
             };
 
             let cursor_glyph = if focused { "▸ " } else { "  " };
@@ -341,7 +341,7 @@ fn render_bottom_hint(f: &mut Frame, area: Rect, state: &ModelsState) {
     let line = Line::from(vec![
         Span::styled(
             " ↑↓ navigate   Enter select   s save   r revert ",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         ),
         dirty_marker,
     ]);

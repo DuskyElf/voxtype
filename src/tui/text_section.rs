@@ -190,7 +190,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
                  (inline editing arrives in a future release).",
                 "~/.config/voxtype/config.toml"
             ),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(Color::Gray),
         )),
     ];
     f.render_widget(Paragraph::new(help).wrap(Wrap { trim: true }), chunks[3]);
