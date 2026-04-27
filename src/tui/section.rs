@@ -19,10 +19,10 @@ pub enum Section {
 impl Section {
     pub const ALL: &'static [Section] = &[
         Section::General,
+        Section::Engine,
+        Section::Models,
         Section::Hotkey,
         Section::Audio,
-        Section::Models,
-        Section::Engine,
         Section::Output,
         Section::Text,
         Section::Vad,

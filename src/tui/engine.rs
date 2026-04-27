@@ -17,6 +17,7 @@ use ratatui::{
 use super::app::{Action, App};
 use super::common::{self, FeedbackLevel as CommonFeedback, FormRowSpec};
 use super::config_editor::{ConfigEditor, EditorError};
+use crate::setup::binary::{self, EngineFamily, InstallKind, Variant};
 
 #[derive(Debug, Clone)]
 pub struct EngineState {
@@ -25,6 +26,14 @@ pub struct EngineState {
     pub cursor: usize,
     pub feedback: Option<Feedback>,
     pub dirty_since_load: bool,
+    /// If the chosen engine needs a different binary family than what's
+    /// currently active, this holds the variant we'll switch to on save.
+    /// `None` means no switch needed.
+    pub pending_variant_switch: Option<Variant>,
+    /// True when we wanted to switch but couldn't (source build, no
+    /// installed variant supports the new engine, …). Surfaced as a warning
+    /// on the screen.
+    pub binary_switch_blocked: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -238,13 +247,99 @@ impl EngineState {
                 .get_bool("omnilingual", "on_demand_loading")
                 .unwrap_or(false),
         };
-        Ok(Self {
+        let mut state = Self {
             engine,
             fields,
             cursor: 0,
             feedback: None,
             dirty_since_load: false,
-        })
+            pending_variant_switch: None,
+            binary_switch_blocked: None,
+        };
+        state.refresh_binary_match();
+        Ok(state)
+    }
+
+    /// Required binary family for an engine name. Whisper needs a Whisper
+    /// binary; everything ONNX-based needs an ONNX binary.
+    fn required_family(engine: &str) -> EngineFamily {
+        if engine == "whisper" {
+            EngineFamily::Whisper
+        } else {
+            EngineFamily::Onnx
+        }
+    }
+
+    /// Recompute pending_variant_switch / binary_switch_blocked based on the
+    /// current engine selection. Called whenever the engine field changes.
+    fn refresh_binary_match(&mut self) {
+        self.pending_variant_switch = None;
+        self.binary_switch_blocked = None;
+
+        let inv = binary::inventory();
+        if inv.install_kind == InstallKind::Source {
+            // Source builds can't be hot-swapped; whether the running binary
+            // supports the chosen engine depends on its compiled features.
+            // Best we can do is flag it.
+            let supported = match self.engine.as_str() {
+                "whisper" => true,
+                "parakeet" => inv.compiled_features.iter().any(|f| *f == "parakeet"),
+                _ => inv
+                    .compiled_features
+                    .iter()
+                    .any(|f| *f == self.engine.as_str()),
+            };
+            if !supported {
+                self.binary_switch_blocked = Some(
+                    "Source build: rebuild voxtype with the corresponding \
+                     Cargo feature for this engine.",
+                );
+            }
+            return;
+        }
+
+        let needed = Self::required_family(&self.engine);
+        let current_family = inv.active_variant.map(|v| v.family());
+        if current_family == Some(needed) {
+            return; // already matches
+        }
+
+        // Pick the recommended variant for the needed family on this hardware.
+        let target = if needed == EngineFamily::Whisper {
+            inv.recommendation.whisper
+        } else {
+            inv.recommendation.onnx
+        };
+
+        // Confirm the recommended variant is actually installed and runnable.
+        let runnable = inv
+            .variants
+            .iter()
+            .find(|s| s.variant == target)
+            .map(|s| s.installed && s.runs_on_this_cpu && s.gpu_available)
+            .unwrap_or(false);
+
+        if runnable {
+            self.pending_variant_switch = Some(target);
+        } else {
+            // Fall back to any installed variant of the right family that
+            // runs on this hardware.
+            let fallback = inv.variants.iter().find(|s| {
+                s.variant.family() == needed
+                    && s.installed
+                    && s.runs_on_this_cpu
+                    && s.gpu_available
+            });
+            match fallback {
+                Some(s) => self.pending_variant_switch = Some(s.variant),
+                None => {
+                    self.binary_switch_blocked = Some(
+                        "No installed binary supports this engine on this \
+                         hardware. Install the matching voxtype variant first.",
+                    );
+                }
+            }
+        }
     }
 
     pub fn save(&mut self) -> Action {
@@ -328,10 +423,20 @@ impl EngineState {
         match ed.save() {
             Ok(()) => {
                 self.dirty_since_load = false;
+                let pending = self.pending_variant_switch.take();
                 self.feedback = Some(Feedback {
                     level: FeedbackLevel::Ok,
-                    message: format!("Saved to {}", ed.path().display()),
+                    message: match pending {
+                        Some(v) => format!(
+                            "Saved. Switching binary to {} (will prompt for sudo)…",
+                            v.display()
+                        ),
+                        None => format!("Saved to {}", ed.path().display()),
+                    },
                 });
+                if let Some(v) = pending {
+                    return Action::SwitchVariant(v);
+                }
             }
             Err(e) => {
                 self.feedback = Some(Feedback {
@@ -350,6 +455,7 @@ impl EngineState {
                 *self = fresh;
                 let max = rows_for_engine(&self.engine).len().saturating_sub(1);
                 self.cursor = cursor.min(max);
+                self.refresh_binary_match();
                 self.feedback = Some(Feedback {
                     level: FeedbackLevel::Ok,
                     message: "Reverted unsaved changes".to_string(),
@@ -395,6 +501,7 @@ impl EngineState {
                 // field.
                 let max = rows_for_engine(&self.engine).len().saturating_sub(1);
                 self.cursor = self.cursor.min(max);
+                self.refresh_binary_match();
             }
             FieldId::WMode => f.w_mode = cycle_str(MODE_CHOICES, &f.w_mode, delta),
             FieldId::WLanguage => f.w_language = cycle_str(LANG_CHOICES, &f.w_language, delta),
@@ -630,62 +737,96 @@ fn heading(text: impl Into<String>) -> Line<'static> {
     ))
 }
 
+fn engine_guidance(state: &EngineState) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Banner about a pending binary switch (or a blocked one) goes first so
+    // the user sees it without scrolling.
+    if let Some(target) = state.pending_variant_switch {
+        lines.push(Line::from(Span::styled(
+            "⚠ Binary switch required",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(format!(
+            "This engine needs the {} family. Saving will also switch the binary to:",
+            family_name(EngineState::required_family(&state.engine))
+        )));
+        lines.push(Line::from(Span::styled(
+            format!("    {} ({})", target.display(), target.binary_name()),
+            Style::default().fg(Color::Cyan),
+        )));
+        lines.push(Line::from(Span::styled(
+            "    Press s to save; pkexec will prompt for sudo.",
+            Style::default().fg(Color::Gray),
+        )));
+        lines.push(Line::from(""));
+    } else if let Some(reason) = state.binary_switch_blocked {
+        lines.push(Line::from(Span::styled(
+            "⚠ Cannot switch binary",
+            Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(reason.to_string()));
+        lines.push(Line::from(""));
+    }
+
+    lines.push(heading("Active engine"));
+    lines.push(Line::from(""));
+    for (name, desc) in [
+        (
+            "whisper",
+            "OpenAI Whisper via whisper.cpp. Default. Multilingual; best \
+             general-purpose accuracy.",
+        ),
+        (
+            "parakeet",
+            "NVIDIA Parakeet TDT/CTC via ONNX Runtime. Tops the Open ASR \
+             Leaderboard for English.",
+        ),
+        (
+            "moonshine",
+            "Useful Sensors Moonshine. Encoder-decoder, low-latency, small \
+             footprint. Good for English dictation.",
+        ),
+        (
+            "sensevoice",
+            "Alibaba SenseVoice-Small. Strong on Chinese / Japanese / Korean \
+             / Cantonese / English in one model.",
+        ),
+        (
+            "paraformer / dolphin / omnilingual",
+            "Specialized FunASR models. Paraformer focuses on Chinese, \
+             Dolphin is dictation-tuned, Omnilingual covers 1600 languages.",
+        ),
+    ] {
+        lines.push(Line::from(Span::styled(
+            format!("{}: ", name),
+            Style::default().add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(desc.to_string()));
+        lines.push(Line::from(""));
+    }
+    lines.push(Line::from(Span::styled(
+        "Engine choice and binary family are linked. The TUI will swap \
+         the binary for you when needed.",
+        Style::default().fg(Color::Gray),
+    )));
+    lines
+}
+
+fn family_name(family: EngineFamily) -> &'static str {
+    match family {
+        EngineFamily::Whisper => "Whisper",
+        EngineFamily::Onnx => "ONNX",
+    }
+}
+
 fn guidance(state: &EngineState) -> Vec<Line<'_>> {
     match state.current_field() {
-        FieldId::Engine => vec![
-            heading("Active engine"),
-            Line::from(""),
-            Line::from(Span::styled(
-                "whisper: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            Line::from(
-                "OpenAI Whisper via whisper.cpp. Default. Multilingual; \
-                 best general-purpose accuracy.",
-            ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "parakeet: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            Line::from(
-                "NVIDIA Parakeet TDT/CTC via ONNX Runtime. Tops the Open ASR \
-                 Leaderboard for English. Requires the parakeet feature.",
-            ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "moonshine: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            Line::from(
-                "Useful Sensors Moonshine. Encoder-decoder, low-latency, \
-                 small footprint. Good for English dictation.",
-            ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "sensevoice: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            Line::from(
-                "Alibaba SenseVoice-Small. Strong on Chinese / Japanese / \
-                 Korean / Cantonese / English in one model.",
-            ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "paraformer / dolphin / omnilingual: ",
-                Style::default().add_modifier(Modifier::BOLD),
-            )),
-            Line::from(
-                "Specialized FunASR models. Paraformer focuses on Chinese, \
-                 Dolphin is dictation-tuned, Omnilingual covers 1600 languages.",
-            ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "Switching engine here also requires an installed binary that \
-                 supports it (see General → Variant).",
-                Style::default().fg(Color::Gray),
-            )),
-        ],
+        FieldId::Engine => engine_guidance(state),
 
         FieldId::WMode => vec![
             heading("Whisper · execution mode"),
