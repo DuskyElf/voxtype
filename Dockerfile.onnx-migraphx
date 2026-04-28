@@ -1,0 +1,80 @@
+# Build environment for voxtype ONNX MIGraphX binary
+# MUST be run on a machine with an AMD GPU
+#
+# Uses Ubuntu 24.04 for glibc 2.39+ (required by ONNX Runtime prebuilt binaries).
+# Building inside Docker caps the glibc requirement at 2.39, preventing the
+# binary from picking up symbols from newer host glibc (e.g. 2.43 on Arch).
+#
+# Usage:
+#   docker build -f Dockerfile.onnx-migraphx -t voxtype-onnx-migraphx-builder .
+#   docker run --rm -v $(pwd)/releases:/output voxtype-onnx-migraphx-builder
+#
+FROM ubuntu:24.04
+
+ARG VERSION=0.7.0
+ARG DEBIAN_FRONTEND=noninteractive
+
+ENV VERSION=${VERSION}
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
+    clang \
+    cmake \
+    pkg-config \
+    libasound2-dev \
+    libssl-dev \
+    protobuf-compiler \
+    libprotobuf-dev \
+    git \
+    binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /build
+
+# Copy source code
+COPY . .
+
+# Build with native optimizations
+ENV RUSTFLAGS="-C target-cpu=native"
+
+# ONNX Runtime will be downloaded during build by the ort crate
+ENV ORT_STRATEGY=download
+
+# Disable LTO for faster builds
+# Build with all ONNX engines + MIGraphX for Parakeet (AMD GPU EP)
+RUN cargo build --release --features parakeet-migraphx,moonshine,sensevoice,paraformer,dolphin,omnilingual,ml-diarization \
+    --config 'profile.release.lto=false' \
+    --config 'profile.release.codegen-units=8' \
+    && cp target/release/voxtype /tmp/voxtype-onnx-migraphx
+
+# The MIGraphX execution provider in ort 2.0.0-rc.12 dlopen's its companion
+# shared libs at runtime instead of being statically linked. They must be
+# installed alongside the binary or the EP fails to register and ort
+# silently falls back to CPU.
+RUN mkdir -p /tmp/onnx-migraphx-libs \
+    && find /build/target/release -maxdepth 2 -name 'libonnxruntime_providers_migraphx.so' -exec cp -L {} /tmp/onnx-migraphx-libs/ \; \
+    && find /build/target/release -maxdepth 2 -name 'libonnxruntime_providers_shared.so' -exec cp -L {} /tmp/onnx-migraphx-libs/ \; \
+    && test -f /tmp/onnx-migraphx-libs/libonnxruntime_providers_migraphx.so \
+    && test -f /tmp/onnx-migraphx-libs/libonnxruntime_providers_shared.so
+
+# Verify binary
+RUN echo "=== Verifying ONNX MIGraphX binary ===" \
+    && /tmp/voxtype-onnx-migraphx --version \
+    && echo "=== Binary size ===" \
+    && ls -lh /tmp/voxtype-onnx-migraphx \
+    && echo "=== Companion .so files ===" \
+    && ls -lh /tmp/onnx-migraphx-libs/
+
+# Output stage: copy binary and companion .so files
+CMD mkdir -p /output \
+    && cp /tmp/voxtype-onnx-migraphx /output/voxtype-${VERSION}-linux-x86_64-onnx-migraphx \
+    && cp /tmp/onnx-migraphx-libs/libonnxruntime_providers_migraphx.so /output/voxtype-${VERSION}-linux-x86_64-onnx-migraphx.libonnxruntime_providers_migraphx.so \
+    && cp /tmp/onnx-migraphx-libs/libonnxruntime_providers_shared.so /output/voxtype-${VERSION}-linux-x86_64-onnx-migraphx.libonnxruntime_providers_shared.so \
+    && echo "Output:" \
+    && ls -la /output/voxtype-${VERSION}-linux-x86_64-onnx-migraphx*

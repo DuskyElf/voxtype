@@ -35,7 +35,7 @@ QUICK START:
 EXAMPLES:
   voxtype setup model         Interactive model selection (Whisper, Parakeet, or Moonshine)
   voxtype setup waybar        Show Waybar integration config
-  voxtype setup gpu           Manage GPU acceleration (Vulkan/CUDA/ROCm)
+  voxtype setup gpu           Manage GPU acceleration (Vulkan/CUDA/MIGraphX)
   voxtype setup onnx          Switch between Whisper and ONNX engines
   voxtype status --follow --format json   Waybar integration
 
@@ -873,7 +873,7 @@ pub enum SetupAction {
         restart: bool,
     },
 
-    /// Manage GPU acceleration (Vulkan for Whisper, CUDA/ROCm for Parakeet)
+    /// Manage GPU acceleration (Vulkan for Whisper, CUDA/MIGraphX for Parakeet)
     Gpu {
         /// Enable GPU acceleration (auto-detects best backend)
         #[arg(long)]

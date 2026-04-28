@@ -66,5 +66,25 @@ fn main() -> Result<(), Error> {
         man_dir.display()
     );
 
+    expose_cuda_build_major();
+
     Ok(())
+}
+
+/// Mirror ort-sys's build-time CUDA version selection so the binary's runtime
+/// probe can reject mismatched hosts before ort attempts (and crashes on)
+/// EP registration. ort 2.0.0-rc.12 picks cu12 vs cu13 prebuilt at compile time
+/// based on the same env var; we read it here and emit a compile-time constant
+/// the parakeet code path uses to short-circuit graceful fallback.
+fn expose_cuda_build_major() {
+    println!("cargo:rerun-if-env-changed=ORT_CUDA_VERSION");
+    let major = match env::var("ORT_CUDA_VERSION").as_deref() {
+        Ok("12") => "12",
+        Ok("13") => "13",
+        // ort-sys defaults to cu12 when unset (see resolve.rs in ort-sys 2.0.0-rc.12).
+        // Match that default so a debug build without ORT_CUDA_VERSION set agrees
+        // with the bundled prebuilt.
+        _ => "12",
+    };
+    println!("cargo:rustc-env=VOXTYPE_BUILD_CUDA_MAJOR={major}");
 }
