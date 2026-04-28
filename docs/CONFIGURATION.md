@@ -27,6 +27,11 @@ Selects which speech-to-text engine to use for transcription.
 - `whisper` - OpenAI Whisper via whisper.cpp (default, recommended)
 - `parakeet` - NVIDIA Parakeet via ONNX Runtime (requires ONNX binary)
 - `moonshine` - Moonshine encoder-decoder transformer via ONNX Runtime (experimental, requires special binary)
+- `sensevoice` - Alibaba SenseVoice CTC via ONNX Runtime (CJK + English)
+- `paraformer` - FunASR Paraformer CTC via ONNX Runtime (Chinese + English)
+- `dolphin` - Dictation-optimized CTC via ONNX Runtime (Chinese + English)
+- `omnilingual` - FunASR Omnilingual CTC via ONNX Runtime (50+ languages)
+- `cohere` - Cohere Transcribe encoder-decoder via ONNX Runtime (#1 Open ASR Leaderboard, 14 languages, ~3 GB model)
 
 **Example:**
 ```toml
@@ -39,11 +44,11 @@ voxtype --engine parakeet daemon
 ```
 
 **Notes:**
-- Parakeet requires an ONNX-enabled binary (`voxtype-*-onnx-*`)
-- When using Parakeet, you must also configure the `[parakeet]` section
-- When using Moonshine, you must also configure the `[moonshine]` section
+- All engines except Whisper require an ONNX-enabled binary (`voxtype-*-onnx-*`)
+- Each ONNX engine reads its own `[<engine>]` section (e.g. `[parakeet]`, `[cohere]`)
 - See [PARAKEET.md](PARAKEET.md) for detailed Parakeet setup instructions
 - See [MOONSHINE.md](MOONSHINE.md) for detailed Moonshine setup instructions
+- Cohere Transcribe is the largest model voxtype ships (~3 GB int8); use `voxtype setup model` to download it
 
 ---
 
@@ -1186,6 +1191,114 @@ model = "base"
 quantized = true
 on_demand_loading = false  # Keep model loaded for fast response
 ```
+
+---
+
+## [cohere]
+
+Configuration for the Cohere Transcribe speech-to-text engine. This section is only used when `engine = "cohere"`.
+
+Cohere Transcribe is an encoder-decoder ASR model from Cohere Labs. It currently sits at #1 on the Open ASR Leaderboard. Whisper-style task tokens give it punctuation, capitalization, and inverse text normalization out of the box.
+
+### model
+
+**Type:** String
+**Default:** `"cohere-transcribe-int8"`
+**Required:** No
+
+The Cohere model to use. Can be a model name (looked up in `~/.local/share/voxtype/models/<name>/`) or an absolute path to a model directory.
+
+**Available models:**
+
+| Model | Quantization | Size | Notes |
+|-------|--------------|------|-------|
+| `cohere-transcribe-int8` | int8 | ~3.1 GB | Default; runs on CPU or GPU |
+
+Download via `voxtype setup model` (interactive) — pick the Cohere section and confirm the size warning.
+
+**Example:**
+```toml
+[cohere]
+model = "cohere-transcribe-int8"
+```
+
+### language
+
+**Type:** String
+**Default:** `"en"`
+**Required:** No
+
+Two-letter ISO 639-1 language code. Cohere officially supports 14 languages.
+
+**Supported values:** `ar`, `de`, `en`, `es`, `fr`, `hi`, `it`, `ja`, `ko`, `nl`, `pt`, `ru`, `tr`, `zh`.
+
+**Example:**
+```toml
+[cohere]
+language = "fr"
+```
+
+The daemon resolves the language to its decoder prefix at startup. Unsupported codes are rejected with a clear error.
+
+### threads
+
+**Type:** Integer (optional)
+**Default:** unset (uses `min(num_cpus, 4)`)
+**Required:** No
+
+Number of CPU threads for ONNX Runtime intra-op parallelism. Leave unset on most machines.
+
+**Example:**
+```toml
+[cohere]
+threads = 8
+```
+
+### on_demand_loading
+
+**Type:** Boolean
+**Default:** `false`
+**Required:** No
+
+Same behavior as `[whisper].on_demand_loading`. When `true`, loads the model only when recording starts and unloads after transcription. Useful when working on a laptop where 3 GB of RAM dedicated to the daemon is too costly.
+
+**Example:**
+```toml
+[cohere]
+on_demand_loading = true
+```
+
+### Configuration Summary
+
+| Option | CLI Flag | Environment Variable | Default | Description |
+|--------|----------|---------------------|---------|-------------|
+| `model` | `--model` | `VOXTYPE_MODEL` | `"cohere-transcribe-int8"` | Cohere model name or path |
+| `language` | `--language` | `VOXTYPE_LANGUAGE` | `"en"` | One of the 14 supported language codes |
+| `threads` | - | - | auto | ONNX intra-op thread count |
+| `on_demand_loading` | - | - | `false` | Load model only when recording starts |
+
+### Complete Example
+
+```toml
+engine = "cohere"
+
+[cohere]
+model = "cohere-transcribe-int8"
+language = "en"
+on_demand_loading = false
+```
+
+### Building from Source
+
+Source builds need the `cohere` Cargo feature. Optional GPU acceleration via `cohere-cuda` or `cohere-tensorrt`:
+
+```bash
+cargo build --release --features cohere           # CPU
+cargo build --release --features cohere-cuda      # NVIDIA GPU
+cargo build --release --features cohere-tensorrt  # NVIDIA + TensorRT EP
+```
+
+The prebuilt `voxtype-*-onnx-*` release binaries already include `cohere`, so users installing via AUR/.deb/.rpm don't need to rebuild.
 
 ---
 

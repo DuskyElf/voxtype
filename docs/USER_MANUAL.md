@@ -642,6 +642,7 @@ Voxtype supports seven speech-to-text engines. Whisper uses whisper.cpp and work
 | **Paraformer** | Chinese + English dictation | No | Chinese (with English code-switching) |
 | **Dolphin** | Dictation-optimized, fast CTC | No | Chinese + English |
 | **Omnilingual** | Broadest language coverage in ONNX engines | No | 50+ languages |
+| **Cohere** | #1 Open ASR Leaderboard accuracy | Optional (CUDA via `cohere-cuda`) | Arabic, German, English, Spanish, French, Hindi, Italian, Japanese, Korean, Dutch, Portuguese, Russian, Turkish, Chinese (14) |
 
 ### Selecting an Engine
 
@@ -658,6 +659,7 @@ engine = "sensevoice"
 engine = "paraformer"
 engine = "dolphin"
 engine = "omnilingual"
+engine = "cohere"
 ```
 
 **Via CLI flag** (overrides config):
@@ -670,9 +672,10 @@ voxtype --engine sensevoice daemon
 voxtype --engine paraformer daemon
 voxtype --engine dolphin daemon
 voxtype --engine omnilingual daemon
+voxtype --engine cohere daemon
 ```
 
-Valid `--engine` values: `whisper`, `parakeet`, `moonshine`, `sensevoice`, `paraformer`, `dolphin`, `omnilingual`.
+Valid `--engine` values: `whisper`, `parakeet`, `moonshine`, `sensevoice`, `paraformer`, `dolphin`, `omnilingual`, `cohere`.
 
 ### Switching to an ONNX Engine
 
@@ -840,6 +843,46 @@ model = "omnilingual-large"  # Default model
 # threads = 4
 # on_demand_loading = false
 ```
+
+### Cohere Transcribe
+
+Cohere Transcribe is an encoder-decoder ASR model from Cohere Labs running via ONNX Runtime. It currently sits at #1 on the Open ASR Leaderboard. It offers:
+
+- Best-in-class accuracy on a wide range of audio (5.42 average WER on the leaderboard)
+- Support for 14 languages with a single model
+- Whisper-style task tokens for punctuation, capitalization, and inverse text normalization
+- Optional CUDA acceleration via the `cohere-cuda` feature
+
+The trade-off: it's the largest model voxtype ships at ~3.1 GB on disk for the int8 quantization. Plan accordingly on laptops with limited storage.
+
+**Requirements:**
+- An ONNX-enabled binary (`voxtype-*-onnx-*`)
+- ~3.1 GB free disk space for the model
+- The Cohere Transcribe model downloaded (`voxtype setup model`, then pick the Cohere section)
+
+**Configuration:**
+
+```toml
+engine = "cohere"
+
+[cohere]
+model = "cohere-transcribe-int8"  # Default model
+language = "en"                    # One of: ar, de, en, es, fr, hi, it, ja, ko, nl, pt, ru, tr, zh
+# threads = 4
+# on_demand_loading = false
+```
+
+**Supported languages:**
+
+Arabic (`ar`), German (`de`), English (`en`, default), Spanish (`es`), French (`fr`), Hindi (`hi`), Italian (`it`), Japanese (`ja`), Korean (`ko`), Dutch (`nl`), Portuguese (`pt`), Russian (`ru`), Turkish (`tr`), Mandarin Chinese (`zh`).
+
+**Installing:**
+
+```bash
+voxtype setup model      # Pick the Cohere section, confirm the size warning
+```
+
+The download fetches five files from the `cstr/cohere-transcribe-onnx-int8` HuggingFace repository (Apache 2.0 licensed, not gated): the encoder/decoder ONNX graphs, their weight sidecars, and `tokens.txt`.
 
 ---
 
