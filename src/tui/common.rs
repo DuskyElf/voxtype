@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -9,6 +10,279 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+
+/// Minimal single-line text input. Owned by a section's state when a free-text
+/// field is being edited; sections check whether `editing` is `Some` and route
+/// keys to [`TextInput::handle_key`] while it is.
+#[derive(Debug, Clone)]
+pub struct TextInput {
+    buffer: String,
+    /// Byte offset within `buffer`. Always lands on a UTF-8 char boundary.
+    cursor: usize,
+    /// Original value at the time editing started — used to detect "no change"
+    /// and reportable on Cancel.
+    original: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextInputResult {
+    /// Key was consumed but editing continues.
+    Continue,
+    /// User pressed Enter; commit `buffer()` to the underlying field.
+    Commit,
+    /// User pressed Esc; discard buffer.
+    Cancel,
+}
+
+impl TextInput {
+    pub fn new(initial: impl Into<String>) -> Self {
+        let buffer: String = initial.into();
+        let cursor = buffer.len();
+        Self {
+            original: buffer.clone(),
+            buffer,
+            cursor,
+        }
+    }
+
+    pub fn buffer(&self) -> &str {
+        &self.buffer
+    }
+
+    pub fn changed(&self) -> bool {
+        self.buffer != self.original
+    }
+
+    pub fn handle_key(&mut self, key: KeyEvent) -> TextInputResult {
+        match key.code {
+            KeyCode::Enter => TextInputResult::Commit,
+            KeyCode::Esc => TextInputResult::Cancel,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                TextInputResult::Cancel
+            }
+            KeyCode::Backspace => {
+                if self.cursor > 0 {
+                    let prev = prev_char_boundary(&self.buffer, self.cursor);
+                    self.buffer.replace_range(prev..self.cursor, "");
+                    self.cursor = prev;
+                }
+                TextInputResult::Continue
+            }
+            KeyCode::Delete => {
+                if self.cursor < self.buffer.len() {
+                    let next = next_char_boundary(&self.buffer, self.cursor);
+                    self.buffer.replace_range(self.cursor..next, "");
+                }
+                TextInputResult::Continue
+            }
+            KeyCode::Left => {
+                if self.cursor > 0 {
+                    self.cursor = prev_char_boundary(&self.buffer, self.cursor);
+                }
+                TextInputResult::Continue
+            }
+            KeyCode::Right => {
+                if self.cursor < self.buffer.len() {
+                    self.cursor = next_char_boundary(&self.buffer, self.cursor);
+                }
+                TextInputResult::Continue
+            }
+            KeyCode::Home => {
+                self.cursor = 0;
+                TextInputResult::Continue
+            }
+            KeyCode::End => {
+                self.cursor = self.buffer.len();
+                TextInputResult::Continue
+            }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.cursor = 0;
+                TextInputResult::Continue
+            }
+            KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.cursor = self.buffer.len();
+                TextInputResult::Continue
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Clear the line.
+                self.buffer.clear();
+                self.cursor = 0;
+                TextInputResult::Continue
+            }
+            KeyCode::Char('w') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Delete the previous word.
+                let prev_word = prev_word_boundary(&self.buffer, self.cursor);
+                self.buffer.replace_range(prev_word..self.cursor, "");
+                self.cursor = prev_word;
+                TextInputResult::Continue
+            }
+            KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let mut tmp = [0u8; 4];
+                let s = c.encode_utf8(&mut tmp);
+                self.buffer.insert_str(self.cursor, s);
+                self.cursor += s.len();
+                TextInputResult::Continue
+            }
+            _ => TextInputResult::Continue,
+        }
+    }
+
+    /// Plain-text rendering of the buffer with a `│` caret inserted at the
+    /// cursor position. Suitable for slotting into a form row's value column
+    /// where we can't easily run multi-span styling.
+    pub fn caret_string(&self) -> String {
+        let mut out = String::with_capacity(self.buffer.len() + 1);
+        out.push_str(&self.buffer[..self.cursor]);
+        out.push('│');
+        out.push_str(&self.buffer[self.cursor..]);
+        out
+    }
+
+    /// Render the buffer with a visible cursor caret. Returned line is meant
+    /// to slot into a form row's "value" column.
+    pub fn render_inline(&self) -> Line<'static> {
+        let (before, at, after) = split_at_cursor(&self.buffer, self.cursor);
+        let caret_glyph = if at.is_empty() { " ".to_string() } else { at };
+        Line::from(vec![
+            Span::raw(before),
+            Span::styled(
+                caret_glyph,
+                Style::default().bg(Color::White).fg(Color::Black),
+            ),
+            Span::raw(after),
+        ])
+    }
+}
+
+fn prev_char_boundary(s: &str, idx: usize) -> usize {
+    let mut i = idx.saturating_sub(1);
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+fn next_char_boundary(s: &str, idx: usize) -> usize {
+    let mut i = (idx + 1).min(s.len());
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
+fn prev_word_boundary(s: &str, idx: usize) -> usize {
+    let bytes = s.as_bytes();
+    let mut i = idx;
+    // Skip trailing spaces.
+    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    // Skip non-space characters.
+    while i > 0 && !bytes[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    i
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyEventKind, KeyEventState};
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    fn ctrl(c: char) -> KeyEvent {
+        KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        }
+    }
+
+    #[test]
+    fn typing_appends_to_buffer() {
+        let mut input = TextInput::new("");
+        input.handle_key(key(KeyCode::Char('h')));
+        input.handle_key(key(KeyCode::Char('i')));
+        assert_eq!(input.buffer(), "hi");
+    }
+
+    #[test]
+    fn backspace_deletes_prev_char() {
+        let mut input = TextInput::new("hello");
+        assert_eq!(input.handle_key(key(KeyCode::Backspace)), TextInputResult::Continue);
+        assert_eq!(input.buffer(), "hell");
+    }
+
+    #[test]
+    fn left_then_insert_inserts_mid_string() {
+        let mut input = TextInput::new("ac");
+        input.handle_key(key(KeyCode::Left));
+        input.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(input.buffer(), "abc");
+    }
+
+    #[test]
+    fn enter_signals_commit() {
+        let mut input = TextInput::new("done");
+        assert_eq!(input.handle_key(key(KeyCode::Enter)), TextInputResult::Commit);
+    }
+
+    #[test]
+    fn esc_signals_cancel() {
+        let mut input = TextInput::new("x");
+        assert_eq!(input.handle_key(key(KeyCode::Esc)), TextInputResult::Cancel);
+    }
+
+    #[test]
+    fn ctrl_u_clears() {
+        let mut input = TextInput::new("hello");
+        input.handle_key(ctrl('u'));
+        assert_eq!(input.buffer(), "");
+    }
+
+    #[test]
+    fn ctrl_w_deletes_prev_word() {
+        let mut input = TextInput::new("hello world");
+        input.handle_key(ctrl('w'));
+        assert_eq!(input.buffer(), "hello ");
+    }
+
+    #[test]
+    fn changed_tracks_buffer_vs_original() {
+        let mut input = TextInput::new("abc");
+        assert!(!input.changed());
+        input.handle_key(key(KeyCode::Char('d')));
+        assert!(input.changed());
+    }
+}
+
+fn split_at_cursor(s: &str, idx: usize) -> (String, String, String) {
+    if idx >= s.len() {
+        return (s.to_string(), String::new(), String::new());
+    }
+    let mut next = idx;
+    while next < s.len() && !s.is_char_boundary(next + 1) {
+        next += 1;
+    }
+    next = (next + 1).min(s.len());
+    while next < s.len() && !s.is_char_boundary(next) {
+        next += 1;
+    }
+    (
+        s[..idx].to_string(),
+        s[idx..next].to_string(),
+        s[next..].to_string(),
+    )
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum FeedbackLevel {

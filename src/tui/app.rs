@@ -212,6 +212,15 @@ impl App {
         self.sidebar_focused = false;
     }
 
+    /// True when a section is in inline-edit mode and should swallow keys
+    /// instead of letting global shortcuts (Esc, Tab, q) act on them.
+    pub fn is_editing(&self) -> bool {
+        match self.current_section {
+            Section::Engine => self.engine.as_ref().is_some_and(|s| s.editing.is_some()),
+            _ => false,
+        }
+    }
+
     pub fn refresh_inventory(&mut self) {
         self.inventory = build_inventory(self.force_package_mode);
         self.daemon_running = is_daemon_running();

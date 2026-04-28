@@ -15,7 +15,9 @@ use ratatui::{
 };
 
 use super::app::{Action, App};
-use super::common::{self, FeedbackLevel as CommonFeedback, FormRowSpec};
+use super::common::{
+    self, FeedbackLevel as CommonFeedback, FormRowSpec, TextInput, TextInputResult,
+};
 use super::config_editor::{ConfigEditor, EditorError};
 use crate::setup::binary::{self, EngineFamily, InstallKind, Variant};
 use crate::setup::model;
@@ -35,6 +37,15 @@ pub struct EngineState {
     /// installed variant supports the new engine, …). Surfaced as a warning
     /// on the screen.
     pub binary_switch_blocked: Option<&'static str>,
+    /// Active inline text edit. While `Some`, all keypresses route to the
+    /// TextInput; navigation and cycle are suspended.
+    pub editing: Option<TextEdit>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextEdit {
+    pub field: FieldId,
+    pub input: TextInput,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -138,7 +149,7 @@ pub enum FeedbackLevel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FieldId {
+pub enum FieldId {
     Engine,
 
     // Whisper
@@ -352,6 +363,7 @@ impl EngineState {
             dirty_since_load: false,
             pending_variant_switch: None,
             binary_switch_blocked: None,
+            editing: None,
         };
         state.refresh_binary_match();
         Ok(state)
@@ -603,6 +615,44 @@ impl EngineState {
         rows.get(self.cursor).copied().unwrap_or(FieldId::Engine)
     }
 
+    /// True if the focused field is a free-text field that should be edited
+    /// with the inline TextInput rather than a cycle list.
+    fn is_text_field(field: FieldId) -> bool {
+        matches!(field, FieldId::WPrompt)
+    }
+
+    fn start_edit_if_text_field(&mut self) -> bool {
+        let field = self.current_field();
+        if !Self::is_text_field(field) {
+            return false;
+        }
+        let initial = match field {
+            FieldId::WPrompt => self.fields.w_initial_prompt.clone().unwrap_or_default(),
+            _ => String::new(),
+        };
+        self.editing = Some(TextEdit {
+            field,
+            input: TextInput::new(initial),
+        });
+        true
+    }
+
+    fn commit_text_edit(&mut self, field: FieldId, buffer: String) {
+        let trimmed = buffer.trim();
+        match field {
+            FieldId::WPrompt => {
+                self.fields.w_initial_prompt = if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(buffer)
+                };
+            }
+            _ => {}
+        }
+        self.dirty_since_load = true;
+        self.feedback = None;
+    }
+
     fn cycle(&mut self, delta: i32) {
         let field = self.current_field();
         let f = &mut self.fields;
@@ -628,12 +678,15 @@ impl EngineState {
             FieldId::WTranslate => f.w_translate = !f.w_translate,
             FieldId::WThreads => f.w_threads = cycle_threads(f.w_threads, delta),
             FieldId::WPrompt => {
-                f.w_initial_prompt = match f.w_initial_prompt.take() {
-                    Some(_) => None,
-                    None => Some(
-                        "Transcribe with proper capitalization and punctuation.".to_string(),
+                // Free-text field: enter inline edit mode instead of cycling
+                // through hardcoded presets.
+                self.editing = Some(TextEdit {
+                    field: FieldId::WPrompt,
+                    input: TextInput::new(
+                        f.w_initial_prompt.clone().unwrap_or_default(),
                     ),
-                }
+                });
+                return; // Don't mark dirty until commit.
             }
             FieldId::WFlashAttention => f.w_flash_attention = !f.w_flash_attention,
             FieldId::WOnDemandLoading => f.w_on_demand_loading = !f.w_on_demand_loading,
@@ -781,16 +834,20 @@ fn field_label_value(state: &EngineState, fid: FieldId) -> (&'static str, String
         ),
         FieldId::WPrompt => (
             "Whisper · initial prompt",
-            f.w_initial_prompt
-                .as_deref()
-                .map(|s| {
-                    if s.len() > 30 {
-                        format!("{}…", &s[..30])
-                    } else {
-                        s.to_string()
-                    }
-                })
-                .unwrap_or_else(|| "(none)".to_string()),
+            match state.editing.as_ref() {
+                Some(e) if e.field == FieldId::WPrompt => e.input.caret_string(),
+                _ => f
+                    .w_initial_prompt
+                    .as_deref()
+                    .map(|s| {
+                        if s.len() > 30 {
+                            format!("{}…", &s[..30])
+                        } else {
+                            s.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "(none)".to_string()),
+            },
         ),
         FieldId::WFlashAttention => ("Whisper · flash attention", yesno(f.w_flash_attention)),
         FieldId::WOnDemandLoading => ("Whisper · on-demand model load", yesno(f.w_on_demand_loading)),
@@ -1052,20 +1109,42 @@ fn guidance(state: &EngineState) -> Vec<Line<'_>> {
                  throughput on a CPU-only setup.",
             ),
         ],
-        FieldId::WPrompt => vec![
-            heading("Whisper · initial prompt"),
-            Line::from(""),
-            Line::from(
-                "Hints Whisper about terminology, capitalization, or formatting. \
-                 Whisper biases its output toward what the prompt establishes.",
-            ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "TUI cycles between (none) and a sample. Edit the body in \
-                 [whisper] initial_prompt directly for a custom prompt.",
-                Style::default().fg(Color::Gray),
-            )),
-        ],
+        FieldId::WPrompt => {
+            let mut lines = vec![
+                heading("Whisper · initial prompt"),
+                Line::from(""),
+                Line::from(
+                    "Hints Whisper about terminology, capitalization, or formatting. \
+                     Whisper biases its output toward what the prompt establishes.",
+                ),
+                Line::from(""),
+                Line::from(
+                    "Useful for proper nouns and technical terms. Examples: \
+                     \"Voxtype, Hyprland, Claude.\" or \"Transcribe with proper \
+                     capitalization and punctuation.\"",
+                ),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "Press Enter or i to edit. While editing: type to insert, \
+                     Backspace/Delete to remove, Enter commits, Esc cancels. \
+                     Ctrl-W deletes the previous word; Ctrl-U clears the line.",
+                    Style::default().fg(Color::Gray),
+                )),
+            ];
+            if state.editing.as_ref().is_some_and(|e| e.field == FieldId::WPrompt) {
+                lines.insert(
+                    0,
+                    Line::from(Span::styled(
+                        "✎ Editing — Enter to commit, Esc to cancel",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )),
+                );
+                lines.insert(1, Line::from(""));
+            }
+            lines
+        }
         FieldId::WFlashAttention => vec![
             heading("Whisper · flash attention"),
             Line::from(""),
@@ -1350,6 +1429,13 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
         Some(s) => s,
         None => return Action::None,
     };
+
+    // While inline-editing a text field, route every key into the input until
+    // the user commits or cancels. Esc / Ctrl-C cancel; Enter commits.
+    if state.editing.is_some() {
+        return handle_edit_key(state, key);
+    }
+
     match key.code {
         KeyCode::Up | KeyCode::Char('k') => {
             state.move_cursor(-1);
@@ -1367,11 +1453,39 @@ pub fn handle_key(app: &mut App, key: KeyEvent) -> Action {
             state.cycle(1);
             Action::None
         }
+        // `i` / Enter open inline-edit on text-editable fields.
+        KeyCode::Enter | KeyCode::Char('i') => {
+            if state.start_edit_if_text_field() {
+                Action::None
+            } else {
+                Action::None
+            }
+        }
         KeyCode::Char('s') => state.save(),
         KeyCode::Char('r') => {
             state.reset();
             Action::None
         }
         _ => Action::None,
+    }
+}
+
+fn handle_edit_key(state: &mut EngineState, key: KeyEvent) -> Action {
+    let Some(editing) = state.editing.as_mut() else {
+        return Action::None;
+    };
+    match editing.input.handle_key(key) {
+        TextInputResult::Continue => Action::None,
+        TextInputResult::Commit => {
+            let buf = editing.input.buffer().to_string();
+            let field = editing.field;
+            state.editing = None;
+            state.commit_text_edit(field, buf);
+            Action::None
+        }
+        TextInputResult::Cancel => {
+            state.editing = None;
+            Action::None
+        }
     }
 }

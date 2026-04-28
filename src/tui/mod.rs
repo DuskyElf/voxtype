@@ -137,6 +137,12 @@ fn dispatch_action(
 }
 
 fn handle_global_key(app: &mut App, key: KeyEvent) -> Option<Action> {
+    // While the active section is inline-editing a text field, swallow
+    // global shortcuts so the user can type 'q', press Esc, etc. into the
+    // input. The section's handle_key gets the key instead.
+    if app.is_editing() {
+        return None;
+    }
     match (key.code, key.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE) => Some(Action::Quit),
         (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
