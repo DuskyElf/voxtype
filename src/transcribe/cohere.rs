@@ -1,8 +1,9 @@
-//! Cohere Transcribe speech-to-text (proof-of-concept, feature-gated)
+//! Cohere Transcribe speech-to-text (feature-gated)
 //!
-//! Uses Cohere Labs' Cohere Transcribe model via ONNX Runtime. This is a
-//! feature-gated proof-of-concept: the module is opt-in via `--features cohere`
-//! and is NOT wired into the CLI, config, factory, or release builds.
+//! Uses Cohere Labs' Cohere Transcribe model via ONNX Runtime. Wired into
+//! the engine factory, CLI, and `[cohere]` config section. Compile in via
+//! `cargo build --features cohere` (CPU) or `--features cohere-cuda`
+//! / `--features cohere-tensorrt` for GPU acceleration.
 //!
 //! ## Model architecture (verified against `cstr/cohere-transcribe-onnx-int8`)
 //!
@@ -73,12 +74,24 @@
 //! done
 //! ```
 //!
-//! ## Running the PoC test
+//! ## Running the integration test
 //!
 //! ```bash
 //! VOXTYPE_COHERE_MODEL_DIR=~/.cache/voxtype-models/cohere-transcribe-int8 \
 //!     cargo test --features cohere transcribe::cohere::tests::cohere_poc \
 //!                -- --ignored --nocapture
+//! ```
+//!
+//! ## Configuration
+//!
+//! ```toml
+//! engine = "cohere"
+//!
+//! [cohere]
+//! model = "cohere-transcribe-int8"   # subdir in voxtype's models dir
+//! language = "en"                     # one of the 14 supported langs
+//! threads = 4                         # optional; defaults to num_cpus.min(4)
+//! on_demand_loading = false
 //! ```
 
 use super::Transcriber;
