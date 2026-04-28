@@ -1181,6 +1181,12 @@ pub enum TranscriptionEngine {
     /// Use Omnilingual (FunASR 50+ language CTC encoder via ONNX Runtime)
     /// Requires: cargo build --features omnilingual
     Omnilingual,
+    /// Use Cohere Transcribe (Cohere Labs encoder-decoder via ONNX Runtime).
+    /// Lands in rc/0.7.0; the variant is recognized here so configure-TUI
+    /// builds prior to that rebase can still parse user configs that have
+    /// already been migrated to Cohere on a parallel rc/0.7.0 daemon.
+    /// Requires: cargo build --features cohere
+    Cohere,
 }
 
 /// VAD backend selection
@@ -1981,6 +1987,10 @@ impl Config {
                 .as_ref()
                 .map(|o| o.on_demand_loading)
                 .unwrap_or(false),
+            // Cohere config is read by rc/0.7.0; on this branch we don't
+            // wire it up but report a sensible default so the helper doesn't
+            // panic on rc/0.7.0 configs.
+            TranscriptionEngine::Cohere => false,
         }
     }
 
@@ -2018,6 +2028,7 @@ impl Config {
                 .as_ref()
                 .map(|o| o.model.as_str())
                 .unwrap_or("omnilingual (not configured)"),
+            TranscriptionEngine::Cohere => "cohere (rc/0.7.0)",
         }
     }
 

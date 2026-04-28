@@ -201,6 +201,16 @@ pub fn create_transcriber(config: &Config) -> Result<Box<dyn Transcriber>, Trans
             "Omnilingual engine requested but voxtype was not compiled with --features omnilingual"
                 .to_string(),
         )),
+        // Cohere is wired into the daemon on rc/0.7.0 — this branch only
+        // recognizes the variant so the TUI can parse rc/0.7.0 configs. If
+        // someone actually tries to run with engine = "cohere" against this
+        // build, fail loudly rather than silently falling back.
+        TranscriptionEngine::Cohere => Err(TranscribeError::InitFailed(
+            "Cohere engine requires voxtype rc/0.7.0 or newer. This build \
+             can read your config but cannot run Cohere transcriptions; use \
+             the rc/0.7.0 daemon for that."
+                .to_string(),
+        )),
     }
 }
 
