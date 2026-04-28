@@ -60,6 +60,10 @@ pub struct AllFields {
     pub w_flash_attention: bool,
     pub w_on_demand_loading: bool,
     pub w_gpu_isolation: bool,
+    /// Only relevant when mode = "remote".
+    pub w_remote_endpoint: Option<String>,
+    pub w_remote_api_key: Option<String>,
+    pub w_remote_model: Option<String>,
 
     // Parakeet
     pub pk_model: String,
@@ -162,6 +166,9 @@ pub enum FieldId {
     WFlashAttention,
     WOnDemandLoading,
     WGpuIsolation,
+    WRemoteEndpoint,
+    WRemoteApiKey,
+    WRemoteModel,
 
     // Parakeet
     PkModel,
@@ -214,20 +221,29 @@ const LANG_CHOICES: &[&str] = &[
 const SV_LANG_CHOICES: &[&str] = &["auto", "zh", "en", "ja", "ko", "yue"];
 const PARAKEET_MODEL_TYPES: &[Option<&str>] = &[None, Some("tdt"), Some("ctc")];
 
-fn rows_for_engine(engine: &str) -> Vec<FieldId> {
+fn rows_for_engine_with_mode(engine: &str, whisper_mode: &str) -> Vec<FieldId> {
     let mut rows = vec![FieldId::Engine];
     match engine {
-        "whisper" => rows.extend_from_slice(&[
-            FieldId::WModel,
-            FieldId::WMode,
-            FieldId::WLanguage,
-            FieldId::WTranslate,
-            FieldId::WThreads,
-            FieldId::WPrompt,
-            FieldId::WFlashAttention,
-            FieldId::WOnDemandLoading,
-            FieldId::WGpuIsolation,
-        ]),
+        "whisper" => {
+            rows.extend_from_slice(&[
+                FieldId::WModel,
+                FieldId::WMode,
+                FieldId::WLanguage,
+                FieldId::WTranslate,
+                FieldId::WThreads,
+                FieldId::WPrompt,
+                FieldId::WFlashAttention,
+                FieldId::WOnDemandLoading,
+                FieldId::WGpuIsolation,
+            ]);
+            if whisper_mode == "remote" {
+                rows.extend_from_slice(&[
+                    FieldId::WRemoteEndpoint,
+                    FieldId::WRemoteApiKey,
+                    FieldId::WRemoteModel,
+                ]);
+            }
+        }
         "parakeet" => rows.extend_from_slice(&[
             FieldId::PkModel,
             FieldId::PkModelType,
@@ -289,6 +305,9 @@ impl EngineState {
             w_flash_attention: ed.get_bool("whisper", "flash_attention").unwrap_or(false),
             w_on_demand_loading: ed.get_bool("whisper", "on_demand_loading").unwrap_or(false),
             w_gpu_isolation: ed.get_bool("whisper", "gpu_isolation").unwrap_or(false),
+            w_remote_endpoint: ed.get_string("whisper", "remote_endpoint"),
+            w_remote_api_key: ed.get_string("whisper", "remote_api_key"),
+            w_remote_model: ed.get_string("whisper", "remote_model"),
 
             // Parakeet
             pk_model: ed
@@ -484,6 +503,18 @@ impl EngineState {
         ed.set_bool("whisper", "flash_attention", f.w_flash_attention);
         ed.set_bool("whisper", "on_demand_loading", f.w_on_demand_loading);
         ed.set_bool("whisper", "gpu_isolation", f.w_gpu_isolation);
+        match &f.w_remote_endpoint {
+            Some(v) if !v.is_empty() => ed.set_string("whisper", "remote_endpoint", v),
+            _ => ed.unset("whisper", "remote_endpoint"),
+        }
+        match &f.w_remote_api_key {
+            Some(v) if !v.is_empty() => ed.set_string("whisper", "remote_api_key", v),
+            _ => ed.unset("whisper", "remote_api_key"),
+        }
+        match &f.w_remote_model {
+            Some(v) if !v.is_empty() => ed.set_string("whisper", "remote_model", v),
+            _ => ed.unset("whisper", "remote_model"),
+        }
 
         // Parakeet — only touch the table if it already existed or the user
         // is making it the active engine. Now that the user can edit model
@@ -584,7 +615,7 @@ impl EngineState {
             Ok(fresh) => {
                 let cursor = self.cursor;
                 *self = fresh;
-                let max = rows_for_engine(&self.engine).len().saturating_sub(1);
+                let max = self.rows().len().saturating_sub(1);
                 self.cursor = cursor.min(max);
                 self.refresh_binary_match();
                 self.feedback = Some(Feedback {
@@ -602,7 +633,7 @@ impl EngineState {
     }
 
     fn move_cursor(&mut self, delta: i32) {
-        let len = rows_for_engine(&self.engine).len() as i32;
+        let len = self.rows().len() as i32;
         if len == 0 {
             return;
         }
@@ -610,15 +641,27 @@ impl EngineState {
         self.cursor = new as usize;
     }
 
+    /// Visible rows for the current engine. Whisper has extra rows when
+    /// running in remote mode; everything else is constant per engine.
+    fn rows(&self) -> Vec<FieldId> {
+        rows_for_engine_with_mode(&self.engine, &self.fields.w_mode)
+    }
+
     fn current_field(&self) -> FieldId {
-        let rows = rows_for_engine(&self.engine);
+        let rows = self.rows();
         rows.get(self.cursor).copied().unwrap_or(FieldId::Engine)
     }
 
     /// True if the focused field is a free-text field that should be edited
     /// with the inline TextInput rather than a cycle list.
     fn is_text_field(field: FieldId) -> bool {
-        matches!(field, FieldId::WPrompt)
+        matches!(
+            field,
+            FieldId::WPrompt
+                | FieldId::WRemoteEndpoint
+                | FieldId::WRemoteApiKey
+                | FieldId::WRemoteModel
+        )
     }
 
     fn start_edit_if_text_field(&mut self) -> bool {
@@ -628,6 +671,9 @@ impl EngineState {
         }
         let initial = match field {
             FieldId::WPrompt => self.fields.w_initial_prompt.clone().unwrap_or_default(),
+            FieldId::WRemoteEndpoint => self.fields.w_remote_endpoint.clone().unwrap_or_default(),
+            FieldId::WRemoteApiKey => self.fields.w_remote_api_key.clone().unwrap_or_default(),
+            FieldId::WRemoteModel => self.fields.w_remote_model.clone().unwrap_or_default(),
             _ => String::new(),
         };
         self.editing = Some(TextEdit {
@@ -639,14 +685,16 @@ impl EngineState {
 
     fn commit_text_edit(&mut self, field: FieldId, buffer: String) {
         let trimmed = buffer.trim();
+        let opt = if trimmed.is_empty() {
+            None
+        } else {
+            Some(buffer.clone())
+        };
         match field {
-            FieldId::WPrompt => {
-                self.fields.w_initial_prompt = if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(buffer)
-                };
-            }
+            FieldId::WPrompt => self.fields.w_initial_prompt = opt,
+            FieldId::WRemoteEndpoint => self.fields.w_remote_endpoint = opt,
+            FieldId::WRemoteApiKey => self.fields.w_remote_api_key = opt,
+            FieldId::WRemoteModel => self.fields.w_remote_model = opt,
             _ => {}
         }
         self.dirty_since_load = true;
@@ -668,7 +716,7 @@ impl EngineState {
                 // Clamp cursor into the new engine's row range; keep it at row 1
                 // when present so the user lands on the first engine-specific
                 // field.
-                let max = rows_for_engine(&self.engine).len().saturating_sub(1);
+                let max = self.rows().len().saturating_sub(1);
                 self.cursor = self.cursor.min(max);
                 self.refresh_binary_match();
             }
@@ -691,6 +739,12 @@ impl EngineState {
             FieldId::WFlashAttention => f.w_flash_attention = !f.w_flash_attention,
             FieldId::WOnDemandLoading => f.w_on_demand_loading = !f.w_on_demand_loading,
             FieldId::WGpuIsolation => f.w_gpu_isolation = !f.w_gpu_isolation,
+            FieldId::WRemoteEndpoint
+            | FieldId::WRemoteApiKey
+            | FieldId::WRemoteModel => {
+                self.start_edit_if_text_field();
+                return;
+            }
 
             FieldId::PkModel => f.pk_model = cycle_model("parakeet", &f.pk_model, delta),
             FieldId::PkModelType => {
@@ -787,7 +841,7 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         }
     };
 
-    let rows: Vec<FormRowSpec> = rows_for_engine(&state.engine)
+    let rows: Vec<FormRowSpec> = state.rows()
         .iter()
         .enumerate()
         .map(|(i, fid)| {
@@ -852,6 +906,36 @@ fn field_label_value(state: &EngineState, fid: FieldId) -> (&'static str, String
         FieldId::WFlashAttention => ("Whisper · flash attention", yesno(f.w_flash_attention)),
         FieldId::WOnDemandLoading => ("Whisper · on-demand model load", yesno(f.w_on_demand_loading)),
         FieldId::WGpuIsolation => ("Whisper · GPU isolation", yesno(f.w_gpu_isolation)),
+        FieldId::WRemoteEndpoint => (
+            "Whisper · remote endpoint",
+            match state.editing.as_ref() {
+                Some(e) if e.field == FieldId::WRemoteEndpoint => e.input.caret_string(),
+                _ => f
+                    .w_remote_endpoint
+                    .clone()
+                    .unwrap_or_else(|| "(unset)".to_string()),
+            },
+        ),
+        FieldId::WRemoteApiKey => (
+            "Whisper · remote API key",
+            match state.editing.as_ref() {
+                Some(e) if e.field == FieldId::WRemoteApiKey => mask(&e.input.caret_string()),
+                _ => match f.w_remote_api_key.as_deref() {
+                    None | Some("") => "(unset)".to_string(),
+                    Some(_) => "•••••• (set; press Enter to edit)".to_string(),
+                },
+            },
+        ),
+        FieldId::WRemoteModel => (
+            "Whisper · remote model",
+            match state.editing.as_ref() {
+                Some(e) if e.field == FieldId::WRemoteModel => e.input.caret_string(),
+                _ => f
+                    .w_remote_model
+                    .clone()
+                    .unwrap_or_else(|| "(unset)".to_string()),
+            },
+        ),
 
         FieldId::PkModel => ("Parakeet · model", f.pk_model.clone()),
         FieldId::PkModelType => (
@@ -930,6 +1014,18 @@ fn field_label_value(state: &EngineState, fid: FieldId) -> (&'static str, String
 
 fn yesno(b: bool) -> String {
     (if b { "yes" } else { "no" }).to_string()
+}
+
+/// Mask a secret value for on-screen display while editing — show only the
+/// final character so the user can verify they're typing what they intended,
+/// but don't render the full key in the form row.
+fn mask(s: &str) -> String {
+    if s.is_empty() {
+        return s.to_string();
+    }
+    let last = s.chars().last().map(|c| c.to_string()).unwrap_or_default();
+    let bullets: String = std::iter::repeat('•').take(s.chars().count() - 1).collect();
+    format!("{}{}", bullets, last)
 }
 
 fn heading(text: impl Into<String>) -> Line<'static> {
@@ -1306,6 +1402,58 @@ fn guidance(state: &EngineState) -> Vec<Line<'_>> {
 
         FieldId::OmThreads => threads_guidance("Omnilingual"),
         FieldId::OmOnDemandLoading => on_demand_guidance("Omnilingual"),
+
+        FieldId::WRemoteEndpoint => vec![
+            heading("Whisper · remote endpoint"),
+            Line::from(""),
+            Line::from(
+                "OpenAI-compatible Whisper API base URL. voxtype POSTs audio \
+                 multipart/form-data to <endpoint>/audio/transcriptions.",
+            ),
+            Line::from(""),
+            Line::from(
+                "Examples: https://api.openai.com/v1, http://localhost:9000/v1 \
+                 (whisper.cpp server), https://api.groq.com/openai/v1.",
+            ),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press Enter to edit. Esc cancels.",
+                Style::default().fg(Color::Gray),
+            )),
+        ],
+        FieldId::WRemoteApiKey => vec![
+            heading("Whisper · remote API key"),
+            Line::from(""),
+            Line::from(
+                "Bearer token for the remote endpoint. Stored as plain text \
+                 in config.toml — protect that file accordingly.",
+            ),
+            Line::from(""),
+            Line::from(
+                "If you'd rather not have it on disk, set the \
+                 VOXTYPE_WHISPER_API_KEY environment variable instead and \
+                 leave this unset.",
+            ),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Press Enter to edit. Display is masked while not editing.",
+                Style::default().fg(Color::Gray),
+            )),
+        ],
+        FieldId::WRemoteModel => vec![
+            heading("Whisper · remote model"),
+            Line::from(""),
+            Line::from(
+                "Model name to send with each request (the `model` field in \
+                 the multipart form). Defaults to whisper-1 if unset.",
+            ),
+            Line::from(""),
+            Line::from(
+                "Common values: whisper-1 (OpenAI), whisper-large-v3 \
+                 (Groq, Together), whisper.cpp (whisper.cpp server). Check \
+                 your provider's docs.",
+            ),
+        ],
     }
 }
 
