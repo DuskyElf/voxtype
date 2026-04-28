@@ -58,6 +58,8 @@ pub struct App {
     pub sidebar_cursor: usize,
     /// True when keyboard input is steered at the sidebar (Tab toggles).
     pub sidebar_focused: bool,
+    /// `?` toggles a centered help overlay listing every keybinding.
+    pub help_open: bool,
     /// Lazily loaded Hotkey section state. None until the user opens Hotkey
     /// for the first time (or load fails).
     pub hotkey: Option<HotkeyState>,
@@ -130,6 +132,7 @@ impl App {
             current_section: Section::General,
             sidebar_cursor: 0,
             sidebar_focused: true,
+            help_open: false,
             hotkey: None,
             audio: None,
             engine: None,

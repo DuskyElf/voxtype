@@ -143,6 +143,17 @@ fn handle_global_key(app: &mut App, key: KeyEvent) -> Option<Action> {
     if app.is_editing() {
         return None;
     }
+
+    // Help overlay: any key dismisses it (including ?).
+    if app.help_open {
+        app.help_open = false;
+        return Some(Action::None);
+    }
+    if matches!(key.code, KeyCode::Char('?')) {
+        app.help_open = true;
+        return Some(Action::None);
+    }
+
     match (key.code, key.modifiers) {
         (KeyCode::Char('q'), KeyModifiers::NONE) => Some(Action::Quit),
         (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => Some(Action::Quit),
@@ -225,6 +236,72 @@ fn draw(f: &mut Frame, app: &App) {
     render_section(f, body[1], app);
 
     render_footer(f, outer[2], app);
+
+    if app.help_open {
+        render_help_overlay(f);
+    }
+}
+
+fn render_help_overlay(f: &mut Frame) {
+    let area = f.area();
+    // Centered modal: ~70% width, ~85% height, capped at 78x30.
+    let w = area.width.saturating_sub(8).min(78);
+    let h = area.height.saturating_sub(4).min(30);
+    let x = area.x + area.width.saturating_sub(w) / 2;
+    let y = area.y + area.height.saturating_sub(h) / 2;
+    let rect = Rect {
+        x,
+        y,
+        width: w,
+        height: h,
+    };
+
+    // Clear under the modal so it overpaints whatever's behind.
+    f.render_widget(ratatui::widgets::Clear, rect);
+
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan))
+        .title(" Voxtype Configuration — Help ");
+    let inner = block.inner(rect);
+    f.render_widget(block, rect);
+
+    let bold = Style::default().add_modifier(ratatui::style::Modifier::BOLD);
+    let dim = Style::default().fg(Color::Gray);
+
+    let lines = vec![
+        Line::from(Span::styled("Global", bold)),
+        Line::from("  Tab          Toggle focus between sidebar and section"),
+        Line::from("  Esc          Sidebar focus / quit from sidebar"),
+        Line::from("  q, Ctrl-C    Quit"),
+        Line::from("  ?            Toggle this help"),
+        Line::from(""),
+        Line::from(Span::styled("Sidebar", bold)),
+        Line::from("  ↑↓ / jk      Navigate sections"),
+        Line::from("  Enter, →, l  Open section / focus content"),
+        Line::from(""),
+        Line::from(Span::styled("Section forms", bold)),
+        Line::from("  ↑↓ / jk      Navigate fields"),
+        Line::from("  ←→ / hl      Cycle field value"),
+        Line::from("  Space        Toggle / advance"),
+        Line::from("  Enter, i     Edit text field"),
+        Line::from("  s            Save changes to config.toml"),
+        Line::from("  r            Revert unsaved changes"),
+        Line::from(""),
+        Line::from(Span::styled("Inline text editing", bold)),
+        Line::from("  type         Insert at cursor"),
+        Line::from("  ←→           Move cursor"),
+        Line::from("  Home / End   Beginning / end of line"),
+        Line::from("  Backspace    Delete previous char"),
+        Line::from("  Delete       Delete next char"),
+        Line::from("  Ctrl-W       Delete previous word"),
+        Line::from("  Ctrl-U       Clear line"),
+        Line::from("  Enter        Commit"),
+        Line::from("  Esc, Ctrl-C  Cancel"),
+        Line::from(""),
+        Line::from(Span::styled("Press any key to dismiss.", dim)),
+    ];
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn render_title(f: &mut Frame, area: Rect) {
@@ -244,11 +321,11 @@ fn render_title(f: &mut Frame, area: Rect) {
 
 fn render_footer(f: &mut Frame, area: Rect, app: &App) {
     let hint = if app.sidebar_focused {
-        " ↑↓ navigate sections   Enter / → open   Tab focus content   q quit "
+        " ↑↓ navigate sections   Enter / → open   Tab focus content   ? help   q quit "
     } else {
-        " Tab / Esc back to sidebar   q quit "
+        " Tab / Esc back to sidebar   ? help   q quit "
     };
-    let line = Line::from(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+    let line = Line::from(Span::styled(hint, Style::default().fg(Color::Gray)));
     f.render_widget(Paragraph::new(line), area);
 }
 
