@@ -175,6 +175,10 @@ cohere = ["onnx-common"]
 cohere-cuda = ["cohere", "ort/cuda"]
 cohere-tensorrt = ["cohere", "ort/tensorrt"]
 cohere-migraphx = ["cohere", "ort/migraphx"]
+# Dynamic loading for system ONNX Runtime. Used by Nix builds and the
+# AMD/MIGraphX binary, which pairs with the system `onnxruntime-rocm`
+# package (no upstream pyke prebuilt ships the MIGraphX provider .so).
+onnx-load-dynamic = ["ort/load-dynamic"]
 
 [build-dependencies]
 clap = { version = "4", features = ["derive"] }
