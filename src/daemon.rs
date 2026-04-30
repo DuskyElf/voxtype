@@ -30,6 +30,7 @@ async fn send_notification(
     body: &str,
     show_engine_icon: bool,
     engine: crate::config::TranscriptionEngine,
+    urgency: &str,
 ) {
     let title = if show_engine_icon {
         format!("{} {}", crate::output::engine_icon(engine), title)
@@ -37,8 +38,15 @@ async fn send_notification(
         title.to_string()
     };
 
+    let urgency_arg = format!("--urgency={}", crate::output::sanitize_urgency(urgency));
     let _ = Command::new("notify-send")
-        .args(["--app-name=Voxtype", "--expire-time=2000", &title, body])
+        .args([
+            "--app-name=Voxtype",
+            &urgency_arg,
+            "--expire-time=2000",
+            &title,
+            body,
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -852,6 +860,7 @@ impl Daemon {
                                 &format!("ID: {}", meeting_id),
                                 false,
                                 self.config.engine,
+                                &self.config.output.notification.urgency,
                             )
                             .await;
                         }
@@ -892,6 +901,7 @@ impl Daemon {
                             &format!("ID: {}", meeting_id),
                             false,
                             self.config.engine,
+                            &self.config.output.notification.urgency,
                         )
                         .await;
                     }
@@ -923,6 +933,7 @@ impl Daemon {
                     "Recording paused",
                     false,
                     self.config.engine,
+                    &self.config.output.notification.urgency,
                 )
                 .await;
             }
@@ -944,6 +955,7 @@ impl Daemon {
                     "Recording resumed",
                     false,
                     self.config.engine,
+                    &self.config.output.notification.urgency,
                 )
                 .await;
             }
@@ -1206,6 +1218,7 @@ impl Daemon {
                 "Transcribing...",
                 self.config.output.notification.show_engine_icon,
                 self.config.engine,
+                &self.config.output.notification.urgency,
             )
             .await;
         }
@@ -1520,6 +1533,7 @@ impl Daemon {
                                 &final_text,
                                 self.config.output.notification.show_engine_icon,
                                 self.config.engine,
+                                &self.config.output.notification.urgency,
                             )
                             .await;
                         }
@@ -1749,7 +1763,7 @@ impl Daemon {
 
                                 // Send notification if enabled
                                 if self.config.output.notification.on_recording_start {
-                                    send_notification("Push to Talk Active", "Recording...", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                                    send_notification("Push to Talk Active", "Recording...", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                                 }
 
                                 // Prepare model for transcription
@@ -1886,7 +1900,7 @@ impl Daemon {
                                 self.play_feedback(SoundEvent::RecordingStop);
 
                                 if self.config.output.notification.on_recording_stop {
-                                    send_notification("Recording Stopped", "Transcribing...", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                                    send_notification("Recording Stopped", "Transcribing...", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                                 }
 
                                 // Stop audio capture and get remaining samples
@@ -1940,7 +1954,7 @@ impl Daemon {
                                 tracing::info!("Recording started (toggle mode)");
 
                                 if self.config.output.notification.on_recording_start {
-                                    send_notification("Recording Started", "Press hotkey again to stop", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                                    send_notification("Recording Started", "Press hotkey again to stop", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                                 }
 
                                 // Prepare model for transcription
@@ -2070,7 +2084,7 @@ impl Daemon {
                                 self.play_feedback(SoundEvent::RecordingStop);
 
                                 if self.config.output.notification.on_recording_stop {
-                                    send_notification("Recording Stopped", "Transcribing...", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                                    send_notification("Recording Stopped", "Transcribing...", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                                 }
 
                                 // Stop audio capture and get remaining samples
@@ -2150,7 +2164,7 @@ impl Daemon {
                                 }
 
                                 if self.config.output.notification.on_recording_stop {
-                                    send_notification("Cancelled", "Recording discarded", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                                    send_notification("Cancelled", "Recording discarded", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                                 }
                             } else if matches!(state, State::Transcribing { .. }) {
                                 tracing::info!("Transcription cancelled via hotkey");
@@ -2176,7 +2190,7 @@ impl Daemon {
                                 }
 
                                 if self.config.output.notification.on_recording_stop {
-                                    send_notification("Cancelled", "Transcription aborted", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                                    send_notification("Cancelled", "Transcription aborted", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                                 }
                             } else {
                                 tracing::trace!("Cancel ignored - not recording or transcribing");
@@ -2237,7 +2251,7 @@ impl Daemon {
                         }
 
                         if self.config.output.notification.on_recording_stop {
-                            send_notification("Cancelled", "Recording discarded", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                            send_notification("Cancelled", "Recording discarded", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                         }
 
                         continue;
@@ -2376,7 +2390,7 @@ impl Daemon {
                         tracing::info!("Recording started (external trigger), model_override = {:?}", model_override);
 
                         if self.config.output.notification.on_recording_start {
-                            send_notification("Recording Started", "External trigger", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                            send_notification("Recording Started", "External trigger", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                         }
 
                         // Prepare model for transcription
@@ -2508,7 +2522,7 @@ impl Daemon {
                         self.play_feedback(SoundEvent::RecordingStop);
 
                         if self.config.output.notification.on_recording_stop {
-                            send_notification("Recording Stopped", "Transcribing...", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                            send_notification("Recording Stopped", "Transcribing...", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                         }
 
                         // Stop audio capture and get remaining samples
@@ -2582,7 +2596,7 @@ impl Daemon {
                         }
 
                         if self.config.output.notification.on_recording_stop {
-                            send_notification("Cancelled", "Transcription aborted", self.config.output.notification.show_engine_icon, self.config.engine).await;
+                            send_notification("Cancelled", "Transcription aborted", self.config.output.notification.show_engine_icon, self.config.engine, &self.config.output.notification.urgency).await;
                         }
                     }
                 }

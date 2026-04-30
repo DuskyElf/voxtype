@@ -1292,6 +1292,7 @@ async fn show_config(config: &config::Config) -> anyhow::Result<()> {
         "  on_transcription = {}",
         config.output.notification.on_transcription
     );
+    println!("  urgency = {:?}", config.output.notification.urgency);
 
     println!("\n[status]");
     println!("  icon_theme = {:?}", config.status.icon_theme);

@@ -239,6 +239,11 @@ on_recording_stop = false
 # Show notification with transcribed text after transcription completes
 on_transcription = true
 
+# Notification urgency level: "low", "normal", or "critical".
+# On GNOME, "low" notifications are delivered to the drawer without a popup banner.
+# Use "normal" (default) to ensure notifications appear as banners.
+# urgency = "normal"
+
 # [text]
 # Text processing options (word replacements, spoken punctuation)
 #
@@ -1504,6 +1509,15 @@ pub struct NotificationConfig {
     /// Show engine icon in notification title (🦜 for Parakeet, 🗣️ for Whisper)
     #[serde(default)]
     pub show_engine_icon: bool,
+
+    /// Notification urgency level: "low", "normal", or "critical".
+    /// On GNOME, "low" notifications go straight to the drawer without a popup banner.
+    #[serde(default = "default_notification_urgency")]
+    pub urgency: String,
+}
+
+fn default_notification_urgency() -> String {
+    "normal".to_string()
 }
 
 impl Default for NotificationConfig {
@@ -1513,6 +1527,7 @@ impl Default for NotificationConfig {
             on_recording_stop: false,
             on_transcription: true,
             show_engine_icon: false,
+            urgency: default_notification_urgency(),
         }
     }
 }
