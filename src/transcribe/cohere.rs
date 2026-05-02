@@ -55,7 +55,7 @@ use crate::error::TranscribeError;
 use crate::transcribe::Transcriber;
 use crate::transcribe::cohere_fbank::CohereFbank;
 use ort::session::Session;
-use ort::value::{DynValue, Tensor};
+use ort::value::{DynTensor, DynValue, Tensor, TensorElementType, ValueType};
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -126,6 +126,14 @@ pub struct CohereTranscriber {
     tokenizer: Tokenizer,
     fbank: CohereFbank,
     prefix: Vec<i64>,
+    /// Float dtype the encoder emits and the decoder expects on
+    /// `encoder_hidden_states` and the `past_key_values.*` cache tensors.
+    /// Float32 for the q4 / int8 / FP32 variants, Float16 for fp16 / q4f16.
+    /// We discover this once at load time from the encoder's
+    /// `last_hidden_state` output type so the decoder loop can build
+    /// matching empty caches and we can extract the encoder output
+    /// against the right primitive.
+    float_dtype: TensorElementType,
 }
 
 impl CohereTranscriber {
@@ -180,6 +188,32 @@ impl CohereTranscriber {
         let encoder = build_session(&encoder_file, threads, "encoder")?;
         let decoder = build_session(&decoder_file, threads, "decoder")?;
 
+        // The HF Optimum exports use mixed precision: `encoder_hidden_states`
+        // stays Float32 across every variant (q4/int8/FP32 keep encoder
+        // outputs in FP32; the FP16-flavored variants narrow inside the
+        // decoder), but the KV caches and `logits` follow the variant —
+        // Float32 for q4/int8/FP32, Float16 for fp16/q4f16. Detect the KV
+        // dtype from the decoder's `past_key_values.0.decoder.key` input
+        // so we build matching empty caches and read logits at the right
+        // primitive size.
+        let float_dtype = decoder
+            .inputs()
+            .iter()
+            .find(|i| i.name() == "past_key_values.0.decoder.key")
+            .and_then(|i| match i.dtype() {
+                ValueType::Tensor { ty, .. } => Some(*ty),
+                _ => None,
+            })
+            .unwrap_or(TensorElementType::Float32);
+        if float_dtype != TensorElementType::Float32
+            && float_dtype != TensorElementType::Float16
+        {
+            return Err(TranscribeError::InitFailed(format!(
+                "Cohere decoder past_key_values dtype {:?} is neither Float32 nor Float16",
+                float_dtype,
+            )));
+        }
+
         let lang_id = lang_token(language).ok_or_else(|| {
             TranscribeError::InitFailed(format!(
                 "Unsupported Cohere language '{}'. Supported: {}",
@@ -211,6 +245,7 @@ impl CohereTranscriber {
             tokenizer,
             fbank: CohereFbank::new(),
             prefix,
+            float_dtype,
         })
     }
 
@@ -225,28 +260,22 @@ impl CohereTranscriber {
         let enc_input = Tensor::<f32>::from_array(([1usize, n_frames, N_MELS], features_flat))
             .map_err(|e| TranscribeError::InferenceFailed(format!("encoder input: {e}")))?;
 
-        // 2. Encoder forward. Extract the data and drop the outputs + lock
-        // guard before the decoder loop runs, so the encoder mutex is free.
-        let (t_enc, enc_data_vec) = {
+        // 2. Encoder forward. We hold on to the encoder output as a
+        // DynValue (rather than extracting it into a Vec<f32>) so the same
+        // tensor flows back into the decoder by reference, and we don't
+        // have to know whether it's Float32 or Float16 to copy it. The
+        // decoder loop just borrows it by name each step.
+        let encoder_hidden: DynValue = {
             let mut enc = self
                 .encoder
                 .lock()
                 .map_err(|e| TranscribeError::InferenceFailed(format!("encoder lock: {e}")))?;
-            let enc_outputs = enc
+            let mut enc_outputs = enc
                 .run(ort::inputs!["input_features" => enc_input])
                 .map_err(|e| TranscribeError::InferenceFailed(format!("encoder run: {e}")))?;
-            let (enc_shape, enc_data) = enc_outputs["last_hidden_state"]
-                .try_extract_tensor::<f32>()
-                .map_err(|e| {
-                    TranscribeError::InferenceFailed(format!("encoder output: {e}"))
-                })?;
-            if enc_shape.len() != 3 || enc_shape[2] as usize != D_MODEL {
-                return Err(TranscribeError::InferenceFailed(format!(
-                    "encoder output shape {:?} != [1, T_enc, {D_MODEL}]",
-                    enc_shape
-                )));
-            }
-            (enc_shape[1] as usize, enc_data.to_vec())
+            enc_outputs.remove("last_hidden_state").ok_or_else(|| {
+                TranscribeError::InferenceFailed("encoder missing last_hidden_state".to_string())
+            })?
         };
 
         // 3. Decoder generation loop.
@@ -259,12 +288,14 @@ impl CohereTranscriber {
         let mut tokens_so_far: Vec<i64> = self.prefix.clone();
 
         // KV caches grow each step (decoder) or stay constant after step 0
-        // (encoder). On step 0 we pass empty caches with shape [1, 8, 0, 128].
+        // (encoder). On step 0 we pass empty caches with shape [1, 8, 0, 128]
+        // in whatever float dtype the model uses (Float32 for q4/int8/FP32
+        // exports, Float16 for fp16/q4f16).
         let mut past_dec: Vec<DynValue> = (0..N_LAYERS * 2)
-            .map(|_| empty_kv())
+            .map(|_| empty_kv(self.float_dtype))
             .collect::<Result<Vec<_>, _>>()?;
         let mut past_enc: Vec<DynValue> = (0..N_LAYERS * 2)
-            .map(|_| empty_kv())
+            .map(|_| empty_kv(self.float_dtype))
             .collect::<Result<Vec<_>, _>>()?;
 
         for step in 0..max_new {
@@ -307,17 +338,16 @@ impl CohereTranscriber {
             // breaks the lm_head Slice op which uses this as a Starts arg.
             let num_logits = Tensor::<i64>::from_array(([] as [usize; 0], vec![1_i64]))
                 .map_err(|e| TranscribeError::InferenceFailed(format!("num_logits tensor: {e}")))?;
-            let enc_hs = Tensor::<f32>::from_array(
-                ([1usize, t_enc, D_MODEL], enc_data_vec.clone()),
-            )
-            .map_err(|e| TranscribeError::InferenceFailed(format!("enc_hs tensor: {e}")))?;
 
             let mut inputs: Vec<(Cow<str>, ort::session::SessionInputValue)> = Vec::new();
             inputs.push((Cow::Borrowed("input_ids"), input_ids.into()));
             inputs.push((Cow::Borrowed("attention_mask"), attention_mask.into()));
             inputs.push((Cow::Borrowed("position_ids"), position_ids.into()));
             inputs.push((Cow::Borrowed("num_logits_to_keep"), num_logits.into()));
-            inputs.push((Cow::Borrowed("encoder_hidden_states"), enc_hs.into()));
+            inputs.push((
+                Cow::Borrowed("encoder_hidden_states"),
+                ort::session::SessionInputValue::from(&encoder_hidden),
+            ));
 
             for layer in 0..N_LAYERS {
                 let dk_name = format!("past_key_values.{layer}.decoder.key");
@@ -356,25 +386,7 @@ impl CohereTranscriber {
                     TranscribeError::InferenceFailed(format!("decoder step {step}: {e}"))
                 })?;
 
-                let (logits_shape, logits_data) = outputs["logits"]
-                    .try_extract_tensor::<f32>()
-                    .map_err(|e| {
-                        TranscribeError::InferenceFailed(format!("logits extract: {e}"))
-                    })?;
-                if logits_shape.len() != 3 || logits_shape[2] as usize != VOCAB_SIZE {
-                    return Err(TranscribeError::InferenceFailed(format!(
-                        "logits shape {:?} != [1, 1, {VOCAB_SIZE}]",
-                        logits_shape
-                    )));
-                }
-                let mut best = 0_i64;
-                let mut best_v = f32::MIN;
-                for (i, &v) in logits_data.iter().enumerate() {
-                    if v > best_v {
-                        best_v = v;
-                        best = i as i64;
-                    }
-                }
+                let best = argmax_logits(&outputs["logits"], self.float_dtype)?;
 
                 let mut present_dec: Vec<DynValue> = Vec::with_capacity(N_LAYERS * 2);
                 let mut present_enc: Vec<DynValue> = Vec::with_capacity(N_LAYERS * 2);
@@ -438,14 +450,76 @@ impl CohereTranscriber {
     }
 }
 
-/// Empty `[1, 8, 0, 128]` KV tensor for the first decoder call. ort's
-/// raw-data constructors reject zero-sized dimensions, so we go through
-/// `Tensor::new(allocator, shape)` which performs an empty allocation.
-fn empty_kv() -> Result<DynValue, TranscribeError> {
+/// Empty `[1, 8, 0, 128]` KV tensor in `dtype` (Float32 or Float16) for
+/// the first decoder call. ort's raw-data constructors reject zero-sized
+/// dimensions, so we go through `DynTensor::new(allocator, dtype, shape)`
+/// which performs an empty allocation in the requested precision.
+fn empty_kv(dtype: TensorElementType) -> Result<DynValue, TranscribeError> {
     let allocator = ort::memory::Allocator::default();
-    let t = Tensor::<f32>::new(&allocator, [1usize, N_HEADS, 0, HEAD_DIM])
+    let t = DynTensor::new(&allocator, dtype, [1usize, N_HEADS, 0, HEAD_DIM])
         .map_err(|e| TranscribeError::InferenceFailed(format!("empty kv: {e}")))?;
     Ok(t.into_dyn())
+}
+
+/// Argmax over the last logit row, working in either Float32 or Float16
+/// per the model variant. f16 values are widened to f32 for the
+/// comparison so we don't have to depend on `half`'s `Ord` impl across
+/// versions.
+fn argmax_logits(
+    logits: &DynValue,
+    dtype: TensorElementType,
+) -> Result<i64, TranscribeError> {
+    fn pick<F: Copy + PartialOrd, I: Iterator<Item = F>>(it: I) -> i64 {
+        let mut best_idx = 0_i64;
+        let mut best_val: Option<F> = None;
+        for (i, v) in it.enumerate() {
+            match best_val {
+                None => {
+                    best_val = Some(v);
+                    best_idx = i as i64;
+                }
+                Some(b) if v > b => {
+                    best_val = Some(v);
+                    best_idx = i as i64;
+                }
+                _ => {}
+            }
+        }
+        best_idx
+    }
+
+    match dtype {
+        TensorElementType::Float32 => {
+            let (shape, data) = logits
+                .try_extract_tensor::<f32>()
+                .map_err(|e| TranscribeError::InferenceFailed(format!("logits f32: {e}")))?;
+            check_logits_shape(shape)?;
+            Ok(pick(data.iter().copied()))
+        }
+        TensorElementType::Float16 => {
+            let (shape, data) = logits
+                .try_extract_tensor::<half::f16>()
+                .map_err(|e| TranscribeError::InferenceFailed(format!("logits f16: {e}")))?;
+            check_logits_shape(shape)?;
+            // Widen to f32 for the comparison; the relative ordering is
+            // the same and we already pay one allocation worth of work.
+            Ok(pick(data.iter().map(|h| h.to_f32())))
+        }
+        other => Err(TranscribeError::InferenceFailed(format!(
+            "unsupported logits dtype {:?}",
+            other
+        ))),
+    }
+}
+
+fn check_logits_shape(shape: &[i64]) -> Result<(), TranscribeError> {
+    if shape.len() != 3 || shape[2] as usize != VOCAB_SIZE {
+        return Err(TranscribeError::InferenceFailed(format!(
+            "logits shape {:?} != [1, 1, {VOCAB_SIZE}]",
+            shape
+        )));
+    }
+    Ok(())
 }
 
 impl Transcriber for CohereTranscriber {
