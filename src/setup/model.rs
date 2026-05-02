@@ -472,29 +472,126 @@ struct CohereModelInfo {
     huggingface_repo: &'static str,
 }
 
-const COHERE_MODELS: &[CohereModelInfo] = &[CohereModelInfo {
-    name: "int8",
-    dir_name: "cohere-transcribe-int8",
-    // 6 MB encoder structure + 2.8 GB encoder weights + 0.5 MB decoder
-    // structure + 220 MB decoder weights + 270 KB tokens. Round up.
-    size_mb: 3100,
-    description: "Encoder-decoder ASR, #1 Open ASR Leaderboard",
-    languages: "ar,de,en,es,fr,hi,it,ja,ko,nl,pt,ru,tr,zh",
-    files: &[
-        ("cohere-encoder.int8.onnx", "cohere-encoder.int8.onnx"),
-        (
-            "cohere-encoder.int8.onnx.data",
-            "cohere-encoder.int8.onnx.data",
-        ),
-        ("cohere-decoder.int8.onnx", "cohere-decoder.int8.onnx"),
-        (
-            "cohere-decoder.int8.onnx.data",
-            "cohere-decoder.int8.onnx.data",
-        ),
-        ("tokens.txt", "tokens.txt"),
-    ],
-    huggingface_repo: "cstr/cohere-transcribe-onnx-int8",
-}];
+/// Cohere Transcribe variants from the upstream HF Optimum export at
+/// `onnx-community/cohere-transcribe-03-2026-ONNX`. All four share the
+/// same I/O signature (HF-standard merged decoder with per-layer
+/// `past_key_values.{decoder,encoder}.{key,value}`); the only differences
+/// are weight precision and total file size.
+///
+/// Each variant ships:
+/// - `encoder_model{,_<suffix>}.onnx` + `.onnx_data*` shards
+/// - `decoder_model_merged{,_<suffix>}.onnx` + `.onnx_data`
+/// - `tokenizer.json` (HF tokenizer format, replaces the cstr `tokens.txt`)
+/// - `config.json`, `generation_config.json`, `processor_config.json`
+///
+/// We rename the encoder/decoder ONNX files to canonical names locally
+/// (`encoder_model.onnx` / `decoder_model_merged.onnx`) so `cohere.rs`
+/// doesn't need to know about the suffix; the `.onnx_data*` shards keep
+/// their upstream names because the ONNX graph references them by name.
+const COHERE_MODELS: &[CohereModelInfo] = &[
+    CohereModelInfo {
+        name: "q4f16",
+        dir_name: "cohere-transcribe-q4f16",
+        size_mb: 1500,
+        description: "Encoder-decoder ASR, q4 weights + fp16 activations (smallest, GPU-friendly)",
+        languages: "ar,de,el,en,es,fr,it,ja,ko,nl,pl,pt,vi,zh",
+        files: &[
+            ("encoder_model_q4f16.onnx", "encoder_model.onnx"),
+            ("encoder_model_q4f16.onnx_data", "encoder_model_q4f16.onnx_data"),
+            ("decoder_model_merged_q4f16.onnx", "decoder_model_merged.onnx"),
+            (
+                "decoder_model_merged_q4f16.onnx_data",
+                "decoder_model_merged_q4f16.onnx_data",
+            ),
+            ("tokenizer.json", "tokenizer.json"),
+            ("tokenizer_config.json", "tokenizer_config.json"),
+            ("config.json", "config.json"),
+            ("generation_config.json", "generation_config.json"),
+            ("processor_config.json", "processor_config.json"),
+        ],
+        huggingface_repo: "onnx-community/cohere-transcribe-03-2026-ONNX",
+    },
+    CohereModelInfo {
+        name: "q4",
+        dir_name: "cohere-transcribe-q4",
+        size_mb: 2000,
+        description: "Encoder-decoder ASR, 4-bit weights (MIGraphX-compatible on AMD GPU)",
+        languages: "ar,de,el,en,es,fr,it,ja,ko,nl,pl,pt,vi,zh",
+        files: &[
+            ("encoder_model_q4.onnx", "encoder_model.onnx"),
+            ("encoder_model_q4.onnx_data", "encoder_model_q4.onnx_data"),
+            ("decoder_model_merged_q4.onnx", "decoder_model_merged.onnx"),
+            (
+                "decoder_model_merged_q4.onnx_data",
+                "decoder_model_merged_q4.onnx_data",
+            ),
+            ("tokenizer.json", "tokenizer.json"),
+            ("tokenizer_config.json", "tokenizer_config.json"),
+            ("config.json", "config.json"),
+            ("generation_config.json", "generation_config.json"),
+            ("processor_config.json", "processor_config.json"),
+        ],
+        huggingface_repo: "onnx-community/cohere-transcribe-03-2026-ONNX",
+    },
+    CohereModelInfo {
+        name: "int8",
+        dir_name: "cohere-transcribe-int8",
+        size_mb: 2900,
+        description: "Encoder-decoder ASR, 8-bit weights",
+        languages: "ar,de,el,en,es,fr,it,ja,ko,nl,pl,pt,vi,zh",
+        files: &[
+            ("encoder_model_quantized.onnx", "encoder_model.onnx"),
+            (
+                "encoder_model_quantized.onnx_data",
+                "encoder_model_quantized.onnx_data",
+            ),
+            (
+                "encoder_model_quantized.onnx_data_1",
+                "encoder_model_quantized.onnx_data_1",
+            ),
+            (
+                "decoder_model_merged_quantized.onnx",
+                "decoder_model_merged.onnx",
+            ),
+            (
+                "decoder_model_merged_quantized.onnx_data",
+                "decoder_model_merged_quantized.onnx_data",
+            ),
+            ("tokenizer.json", "tokenizer.json"),
+            ("tokenizer_config.json", "tokenizer_config.json"),
+            ("config.json", "config.json"),
+            ("generation_config.json", "generation_config.json"),
+            ("processor_config.json", "processor_config.json"),
+        ],
+        huggingface_repo: "onnx-community/cohere-transcribe-03-2026-ONNX",
+    },
+    CohereModelInfo {
+        name: "fp16",
+        dir_name: "cohere-transcribe-fp16",
+        size_mb: 3900,
+        description: "Encoder-decoder ASR, FP16 weights (highest accuracy, GPU-friendly)",
+        languages: "ar,de,el,en,es,fr,it,ja,ko,nl,pl,pt,vi,zh",
+        files: &[
+            ("encoder_model_fp16.onnx", "encoder_model.onnx"),
+            ("encoder_model_fp16.onnx_data", "encoder_model_fp16.onnx_data"),
+            (
+                "encoder_model_fp16.onnx_data_1",
+                "encoder_model_fp16.onnx_data_1",
+            ),
+            ("decoder_model_merged_fp16.onnx", "decoder_model_merged.onnx"),
+            (
+                "decoder_model_merged_fp16.onnx_data",
+                "decoder_model_merged_fp16.onnx_data",
+            ),
+            ("tokenizer.json", "tokenizer.json"),
+            ("tokenizer_config.json", "tokenizer_config.json"),
+            ("config.json", "config.json"),
+            ("generation_config.json", "generation_config.json"),
+            ("processor_config.json", "processor_config.json"),
+        ],
+        huggingface_repo: "onnx-community/cohere-transcribe-03-2026-ONNX",
+    },
+];
 
 // =============================================================================
 // Whisper Model Functions

@@ -54,15 +54,21 @@ fn dump(label: &str, path: &PathBuf) -> ort::Result<()> {
 }
 
 fn main() -> ort::Result<()> {
-    let dir: PathBuf = env::args()
-        .nth(1)
+    let mut args = env::args().skip(1);
+    let dir: PathBuf = args
+        .next()
         .map(PathBuf::from)
-        .expect("usage: inspect_cohere_onnx <model-dir>");
-    // Tolerate one model failing to load so we get whichever is ready.
-    if let Err(e) = dump("encoder", &dir.join("cohere-encoder.int8.onnx")) {
+        .expect("usage: inspect_cohere_onnx <model-dir> [encoder.onnx] [decoder.onnx]");
+    let enc_name = args
+        .next()
+        .unwrap_or_else(|| "cohere-encoder.int8.onnx".to_string());
+    let dec_name = args
+        .next()
+        .unwrap_or_else(|| "cohere-decoder.int8.onnx".to_string());
+    if let Err(e) = dump("encoder", &dir.join(&enc_name)) {
         println!("encoder failed: {e}");
     }
-    if let Err(e) = dump("decoder", &dir.join("cohere-decoder.int8.onnx")) {
+    if let Err(e) = dump("decoder", &dir.join(&dec_name)) {
         println!("decoder failed: {e}");
     }
     Ok(())
