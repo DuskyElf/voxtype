@@ -49,6 +49,11 @@ else
     exit 1
 fi
 
+# If build-macos.sh built with ONNX engines, libonnxruntime.<ver>.dylib will
+# be sitting next to the binary in releases/. Pick it up so we can bundle it
+# into the .app/Contents/Frameworks/ and make the binary's rpath point at it.
+ORT_DYLIB="$(ls "${RELEASES_DIR}"/libonnxruntime.*.dylib 2>/dev/null | head -1 || true)"
+
 echo -e "${GREEN}Building Voxtype.app for ${VERSION}...${NC}"
 echo "Binary: $BINARY"
 echo
@@ -84,6 +89,29 @@ mkdir -p "$APP_DIR/Contents/Resources"
 # Copy the main voxtype binary (named voxtype-bin to match CFBundleExecutable)
 cp "$BINARY" "$APP_DIR/Contents/MacOS/voxtype-bin"
 chmod +x "$APP_DIR/Contents/MacOS/voxtype-bin"
+
+# If we have an ONNX Runtime dylib alongside the binary, bundle it into
+# Contents/Frameworks/ and patch the binary so it can find it at runtime.
+# The dylib's install_name is `@rpath/libonnxruntime.<ver>.dylib`, so we
+# add `@executable_path/../Frameworks` to the binary's rpath list.
+if [[ -n "$ORT_DYLIB" ]]; then
+    echo -e "${YELLOW}Bundling $(basename "$ORT_DYLIB") into Frameworks/...${NC}"
+    mkdir -p "$APP_DIR/Contents/Frameworks"
+    cp "$ORT_DYLIB" "$APP_DIR/Contents/Frameworks/"
+
+    # Drop any existing rpath entry first so re-runs are idempotent. The
+    # delete fails harmlessly if the rpath wasn't already there.
+    install_name_tool -delete_rpath "@executable_path/../Frameworks" \
+        "$APP_DIR/Contents/MacOS/voxtype-bin" 2>/dev/null || true
+    install_name_tool -add_rpath "@executable_path/../Frameworks" \
+        "$APP_DIR/Contents/MacOS/voxtype-bin"
+
+    # install_name_tool invalidates the existing linker signature; re-sign
+    # adhoc so Gatekeeper sees a valid (if untrusted) signature. The
+    # outer .app gets signed with Developer ID by sign-macos.sh later, if
+    # available.
+    codesign --force --sign - "$APP_DIR/Contents/MacOS/voxtype-bin"
+fi
 
 # Copy VoxtypeMenubar.app
 cp -R "$MENUBAR_APP" "$APP_DIR/Contents/MacOS/"
