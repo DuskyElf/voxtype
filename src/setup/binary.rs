@@ -58,6 +58,23 @@ pub fn install_active_binary(active_bin: &str, binary_path: &Path) -> anyhow::Re
     }
 
     if needs_wrapper {
+        // MIGraphX needs a writeable model-cache directory or its runtime
+        // fails to save compiled graphs and inference errors out (silent
+        // CPU fallback isn't available — the EP fails the call). Default
+        // to $XDG_CACHE_HOME/voxtype/migraphx, honoring any user override.
+        let is_migraphx = canonical
+            .parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str())
+            == Some("migraphx");
+        let migraphx_env = if is_migraphx {
+            "\
+             : \"${ORT_MIGRAPHX_MODEL_CACHE_PATH:=${XDG_CACHE_HOME:-$HOME/.cache}/voxtype/migraphx}\"\n\
+             mkdir -p \"$ORT_MIGRAPHX_MODEL_CACHE_PATH\"\n\
+             export ORT_MIGRAPHX_MODEL_CACHE_PATH\n"
+        } else {
+            ""
+        };
         let wrapper = format!(
             "#!/bin/sh\n\
              # voxtype dispatch wrapper.\n\
@@ -65,7 +82,9 @@ pub fn install_active_binary(active_bin: &str, binary_path: &Path) -> anyhow::Re
              # based provider .so lookup resolves to the right subdirectory.\n\
              # Managed by `voxtype setup onnx --enable` and the AUR package's\n\
              # post_install / post_upgrade hooks; do not edit by hand.\n\
+             {}\
              exec {} \"$@\"\n",
+            migraphx_env,
             canonical.display()
         );
         let mut f = fs::File::create(active_bin).map_err(|e| {
