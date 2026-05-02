@@ -233,6 +233,7 @@ pub trait TextOutput: Send + Sync {
 }
 
 /// Default driver order for type mode
+#[cfg(not(target_os = "macos"))]
 const DEFAULT_DRIVER_ORDER: &[OutputDriver] = &[
     OutputDriver::Wtype,
     OutputDriver::Eitype,
@@ -243,6 +244,7 @@ const DEFAULT_DRIVER_ORDER: &[OutputDriver] = &[
 ];
 
 /// Create a TextOutput implementation for a specific driver
+#[cfg(not(target_os = "macos"))]
 fn create_driver_output(
     driver: OutputDriver,
     config: &OutputConfig,
@@ -296,6 +298,8 @@ pub fn create_output_chain_with_override(
     driver_override: Option<&[OutputDriver]>,
 ) -> Vec<Box<dyn TextOutput>> {
     let mut chain: Vec<Box<dyn TextOutput>> = Vec::new();
+    #[cfg(target_os = "macos")]
+    let _ = driver_override;
 
     // Get effective pre_type_delay_ms (handles deprecated wtype_delay_ms)
     let pre_type_delay_ms = config.effective_pre_type_delay_ms();

@@ -1846,7 +1846,8 @@ impl Daemon {
             .enabled
         {
             tracing::info!("Hotkey: {}", self.config.hotkey.key);
-            match hotkey::create_listener(&self.config.hotkey) {
+            let secondary_model = self.config.whisper.secondary_model.clone();
+            match hotkey::create_listener(&self.config.hotkey, secondary_model) {
                 Ok(listener) => Some(listener),
                 Err(e) => {
                     tracing::warn!("Failed to create hotkey listener: {}. Use 'voxtype record' commands instead.", e);
@@ -3305,6 +3306,7 @@ mod tests {
         });
     }
 
+    #[test]
     fn test_pidlock_acquisition_succeeds() {
         with_test_runtime_dir(|dir| {
             let lock_path = dir.join("voxtype.lock");

@@ -269,14 +269,19 @@ fn parse_key_name(name: &str) -> Option<Key> {
 }
 
 /// Create a hotkey listener for macOS
-pub fn create_listener(config: &HotkeyConfig) -> Result<Box<dyn HotkeyListener>> {
+pub fn create_listener(
+    config: &HotkeyConfig,
+    _secondary_model: Option<String>,
+) -> Result<Box<dyn HotkeyListener>> {
     Ok(Box::new(RdevHotkeyListener::new(config)?))
 }
 
 /// Check if Accessibility permission is granted by trying to create an event tap.
 /// Unlike AXIsProcessTrusted(), this is not cached and reflects the current state.
 fn is_accessibility_granted() -> bool {
-    use core_graphics::event::{CGEventTap, CGEventTapLocation, CGEventTapPlacement, CGEventTapOptions, CGEventType};
+    use core_graphics::event::{
+        CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
+    };
 
     let tap = CGEventTap::new(
         CGEventTapLocation::Session,
