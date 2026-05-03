@@ -914,36 +914,65 @@ fn active_model_for_engine(engine: &str, f: &AllFields) -> Option<String> {
 
 /// Engines (by name) the user can land on in the Engine cycle. Engines whose
 /// binary is not installed are excluded so users can't pick one and then have
-/// the daemon refuse to start. On a source build the compiled-in features
-/// govern instead.
+/// the daemon refuse to start.
+///
+/// We always check /usr/lib/voxtype/ first via `installed_engines(&inv)`,
+/// regardless of whether the running TUI is a package binary or a source
+/// build — the daemon runs whatever /usr/bin/voxtype resolves to, not
+/// necessarily the same binary as the TUI. A developer running a source-built
+/// `voxtype configure` on a host that also has the AUR package installed
+/// should still see every engine the package binaries support.
+///
+/// The compiled-features fallback only kicks in for pure source builds with
+/// no package binaries installed alongside (CI machines, fresh dev VMs);
+/// there, the daemon would have to run the same source binary, so Cargo
+/// features are the right gate.
 fn installed_engine_choices() -> std::collections::HashSet<&'static str> {
-    use crate::setup::binary::installed_engines;
-    let inv = binary::inventory();
-    if inv.install_kind == InstallKind::Source {
-        // Source: trust whatever Cargo features were compiled in. Whisper is
-        // always available because the no-features default still builds it.
-        let mut out = std::collections::HashSet::new();
-        out.insert("whisper");
-        for f in &inv.compiled_features {
-            // The Cargo feature names match the engine names exactly for the
-            // ONNX engines.
-            for engine in [
-                "parakeet",
-                "moonshine",
-                "sensevoice",
-                "paraformer",
-                "dolphin",
-                "omnilingual",
-                "cohere",
-            ] {
-                if *f == engine {
-                    out.insert(engine);
-                }
+    let mut out = std::collections::HashSet::new();
+
+    // Look at /usr/lib/voxtype/ first. enumerate_installed walks the dir
+    // directly, independent of install_kind, so a source build running
+    // alongside an AUR install still discovers package binaries.
+    for variant in binary::enumerate_installed() {
+        for engine in [
+            "whisper",
+            "parakeet",
+            "moonshine",
+            "sensevoice",
+            "paraformer",
+            "dolphin",
+            "omnilingual",
+            "cohere",
+        ] {
+            if variant.supports_engine(engine) {
+                out.insert(engine);
             }
         }
-        return out;
     }
-    installed_engines(&inv)
+
+    // Also include engines the running binary itself was compiled with —
+    // covers pure source builds with no /usr/lib/voxtype/. The
+    // no-features cargo default still ships the Whisper engine, so
+    // Whisper is always present.
+    let inv = binary::inventory();
+    out.insert("whisper");
+    for f in &inv.compiled_features {
+        for engine in [
+            "parakeet",
+            "moonshine",
+            "sensevoice",
+            "paraformer",
+            "dolphin",
+            "omnilingual",
+            "cohere",
+        ] {
+            if *f == engine {
+                out.insert(engine);
+            }
+        }
+    }
+
+    out
 }
 
 /// Resolve where on disk a model directory lives. Mirrors the daemon's
