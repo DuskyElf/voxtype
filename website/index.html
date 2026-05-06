@@ -249,7 +249,7 @@
                             <line x1="12" y1="17" x2="12" y2="21"/>
                         </svg>
                     </div>
-                    <h3>Hyprland, Sway, River, GNOME, KDE</h3>
+                    <h3>Hyprland, Niri, Sway, River, GNOME, KDE</h3>
                     <p>
                         Compositor keybindings everywhere, evdev fallback for X11, Wayland-first
                         typing via wtype with full CJK support. Falls back through dotool
@@ -280,11 +280,12 @@
                             <line x1="9" y1="21" x2="9" y2="9"/>
                         </svg>
                     </div>
-                    <h3>Subprocess isolation</h3>
+                    <h3>Optional subprocess isolation</h3>
                     <p>
-                        Each transcription runs in a child process that exits cleanly. The daemon
-                        doesn't pin GPU memory between dictations and idle RAM stays low.
-                        Set it once and forget it.
+                        Flip <code>gpu_isolation = true</code> and each transcription runs in a
+                        child process that exits cleanly &mdash; no pinned GPU memory between
+                        dictations, no idle daemon hogging VRAM. Off by default so the daemon stays
+                        warm; on when you'd rather share the GPU with other apps.
                     </p>
                 </div>
 

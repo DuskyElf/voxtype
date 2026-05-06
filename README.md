@@ -14,14 +14,14 @@ Hold a hotkey (default: ScrollLock) while speaking, release to transcribe and ou
 
 - **Cohere Transcribe at 9-11× realtime — on your CPU.** Quantized to 1.5 GB (q4f16). Punctuation, capitalization, and inverse text normalization out of the box. Sits at #1 on the Open ASR Leaderboard. *(New in 0.7.0)*
 - **Parakeet on AMD and NVIDIA GPUs.** MIGraphX 7.2 for Radeon, separate CUDA 12 and CUDA 13 binaries for every NVIDIA driver generation, Vulkan for Whisper across vendors. *(MIGraphX new in 0.7.0)*
-- **Subprocess isolation.** Each transcription runs in a child process that exits cleanly. The daemon doesn't pin GPU memory between dictations. Set it once and forget it.
+- **Optional subprocess isolation.** Flip `gpu_isolation = true` and each transcription runs in a child process that exits cleanly — no pinned GPU memory between dictations. Off by default so the daemon stays warm; on when you'd rather share the GPU with other apps.
 - **Dynamic per-engine model loading.** Configure all 7 engines, pay memory only for the active one. Models load on first use and unload when idle.
 - **Seven transcription engines.** Whisper, Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, Omnilingual. Switch with `voxtype configure` or one config line. CJK and 1600+ languages covered by the multilingual engines.
 - **Meeting mode.** Continuous transcription with chunked processing, speaker attribution, and export to Markdown, JSON, SRT, or VTT.
 
 ### Native Linux integration
 
-- **Hyprland, Sway, River, GNOME, KDE.** Compositor keybindings everywhere, evdev fallback for X11, Wayland-first typing via wtype with full CJK support. Falls back through dotool → ydotool → clipboard if any layer is unavailable.
+- **Hyprland, Niri, Sway, River, GNOME, KDE.** Compositor keybindings everywhere, evdev fallback for X11, Wayland-first typing via wtype with full CJK support. Falls back through dotool → ydotool → clipboard if any layer is unavailable.
 - **Pauses your music.** Auto-pauses Spotify, Plasma media players, anything that speaks MPRIS the moment you start dictating. Resumes on release.
 - **Floating waveform OSD.** Matches your swayosd band by default — same vertical position as volume and brightness — so the level meter sits where you already look for system feedback.
 - **Interactive TUI configure.** `voxtype configure` (also surfaces in Walker / fuzzel / rofi) edits every option without touching config.toml. Auto-downloads missing models, swaps GPU binaries via pkexec, restarts the daemon for you.
