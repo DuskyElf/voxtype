@@ -14,7 +14,7 @@ Hold a hotkey (default: ScrollLock) while speaking, release to transcribe and ou
 
 - **Cohere Transcribe at 9-11× realtime — on your CPU.** Quantized to 1.5 GB (q4f16). Punctuation, capitalization, and inverse text normalization out of the box. Sits at #1 on the Open ASR Leaderboard. *(New in 0.7.0)*
 - **Parakeet on AMD and NVIDIA GPUs.** MIGraphX 7.2 for Radeon, separate CUDA 12 and CUDA 13 binaries for every NVIDIA driver generation, Vulkan for Whisper across vendors. *(MIGraphX new in 0.7.0)*
-- **Optional subprocess isolation.** Flip `gpu_isolation = true` and each transcription runs in a child process that exits cleanly — no pinned GPU memory between dictations. Off by default so the daemon stays warm; on when you'd rather share the GPU with other apps.
+- **Text processing built in.** Spoken punctuation (`"comma"` → `,`), per-user replacement tables for common mistranscriptions, and an optional post-processing pipe through any LLM or shell script. Fix domain terms, drop filler words, polish grammar — all without leaving voxtype.
 - **Dynamic per-engine model loading.** Configure all 7 engines, pay memory only for the active one. Models load on first use and unload when idle.
 - **Seven transcription engines.** Whisper, Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, Omnilingual. Switch with `voxtype configure` or one config line. CJK and 1600+ languages covered by the multilingual engines.
 - **Meeting mode.** Continuous transcription with chunked processing, speaker attribution, and export to Markdown, JSON, SRT, or VTT.

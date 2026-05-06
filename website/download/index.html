@@ -437,34 +437,18 @@
                     </svg>
                     macOS
                 </h2>
-                <p class="description">For macOS 12 Monterey and later (Apple Silicon & Intel)</p>
+                <p class="description">For macOS 13 Ventura and later (Apple Silicon &amp; Intel). Install via Homebrew tap.</p>
                 <div class="download-buttons">
-                    <a href="https://github.com/peteonrails/voxtype/releases" class="download-btn disabled">
-                        <!-- Mounted drive icon -->
-                        <svg class="pkg-icon" viewBox="0 0 24 24" fill="none">
-                            <defs>
-                                <linearGradient id="driveTop" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#666"/>
-                                    <stop offset="100%" style="stop-color:#444"/>
-                                </linearGradient>
-                                <linearGradient id="driveFront" x1="0%" y1="0%" x2="0%" y2="100%">
-                                    <stop offset="0%" style="stop-color:#555"/>
-                                    <stop offset="100%" style="stop-color:#333"/>
-                                </linearGradient>
-                            </defs>
-                            <!-- Top face -->
-                            <path d="M4 8l4-4h8l4 4v2H4V8z" fill="url(#driveTop)"/>
-                            <!-- Front face -->
-                            <path d="M4 10h16v8a2 2 0 01-2 2H6a2 2 0 01-2-2v-8z" fill="url(#driveFront)"/>
-                            <!-- Edge highlight -->
-                            <path d="M4 10h16" stroke="#666" stroke-width="0.5"/>
-                            <!-- Drive slot -->
-                            <rect x="7" y="14" width="10" height="1.5" rx="0.75" fill="#666"/>
+                    <a href="#macos-brew" class="download-btn">
+                        <!-- Homebrew terminal icon -->
+                        <svg class="pkg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="4 17 10 11 4 5"/>
+                            <line x1="12" y1="19" x2="20" y2="19"/>
                         </svg>
-                        Coming Soon
+                        Install via Homebrew
                     </a>
                 </div>
-                <span class="version-badge coming-soon-badge">Coming Soon</span>
+                <span class="version-badge">v0.7.0-rc2</span>
             </div>
         </div>
     </section>
@@ -522,7 +506,7 @@
             </div>
 
             <!-- macOS -->
-            <div class="pkg-manager-card">
+            <div class="pkg-manager-card" id="macos-brew">
                 <h3>
                     <svg class="distro-icon" viewBox="0 0 24 24">
                         <circle cx="12" cy="12" r="10" fill="#333"/>
@@ -531,9 +515,9 @@
                     </svg>
                     macOS
                 </h3>
-                <p>Install via Homebrew (beta)</p>
+                <p>Install via Homebrew Cask. Apple Silicon and Intel both supported. The cask runs <code>voxtype setup</code> on first launch to download the model and request microphone permissions.</p>
                 <div class="code-block">
-                    <code><span class="comment"># Add the tap</span><br/>brew tap peteonrails/voxtype<br/><br/><span class="comment"># Install</span><br/>brew install --cask voxtype</code>
+                    <code><span class="comment"># Add the tap</span><br/>brew tap peteonrails/voxtype<br/><br/><span class="comment"># Install</span><br/>brew install --cask voxtype<br/><br/><span class="comment"># Launch the menubar app</span><br/>open -a Voxtype</code>
                 </div>
             </div>
         </div>
