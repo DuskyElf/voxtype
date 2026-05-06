@@ -4,23 +4,33 @@
 
 **[voxtype.io](https://voxtype.io)**
 
-Push-to-talk voice-to-text for Linux. Optimized for Wayland, works on X11 too.
+Voice-to-text for Linux. 9-11× realtime on your CPU. Local by default.
 
-Hold a hotkey (default: ScrollLock) while speaking, release to transcribe and output the text at your cursor position.
+Hold a hotkey (default: ScrollLock) while speaking, release to transcribe and output the text at your cursor position. Voxtype runs Cohere Transcribe (#1 on the Open ASR Leaderboard) faster than realtime on a plain Zen 4 CPU. Parakeet, Whisper, and five more engines if you want them. No cloud, no subscription, no telemetry.
 
 ## Features
 
-- **Works on any Linux desktop** - Uses compositor keybindings (Hyprland, Sway, River) with evdev fallback for X11 and other environments
-- **Fully offline by default** - Uses whisper.cpp for local transcription, with optional remote server support
-- **7 transcription engines** - Whisper, Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, and Omnilingual (see [Supported Engines](#supported-engines) below)
-- **Chinese, Japanese, Korean, and 1600+ languages** - SenseVoice, Dolphin, and Omnilingual add native support for CJK and other non-Latin scripts
-- **Meeting mode** - Continuous meeting transcription with chunked processing, speaker attribution, and export to Markdown, JSON, SRT, or VTT
-- **Fallback chain** - Types via wtype (best CJK support), falls back to dotool (keyboard layout support), ydotool, then clipboard
-- **Push-to-talk or Toggle mode** - Hold to record, or press once to start/stop
-- **Audio feedback** - Optional sound cues when recording starts/stops
-- **Configurable** - Choose your hotkey, model size, output mode, and more
-- **Interactive TUI** - `voxtype configure` (also surfaces in Walker / fuzzel / rofi as "Voxtype Configuration") edits every option without touching config.toml by hand
-- **Waybar integration** - Optional status indicator shows recording state in your bar
+### Speed and engines
+
+- **Cohere Transcribe at 9-11× realtime — on your CPU.** Quantized to 1.5 GB (q4f16). Punctuation, capitalization, and inverse text normalization out of the box. Sits at #1 on the Open ASR Leaderboard. *(New in 0.7.0)*
+- **Parakeet on AMD and NVIDIA GPUs.** MIGraphX 7.2 for Radeon, separate CUDA 12 and CUDA 13 binaries for every NVIDIA driver generation, Vulkan for Whisper across vendors. *(MIGraphX new in 0.7.0)*
+- **Subprocess isolation.** Each transcription runs in a child process that exits cleanly. The daemon doesn't pin GPU memory between dictations. Set it once and forget it.
+- **Dynamic per-engine model loading.** Configure all 7 engines, pay memory only for the active one. Models load on first use and unload when idle.
+- **Seven transcription engines.** Whisper, Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, Omnilingual. Switch with `voxtype configure` or one config line. CJK and 1600+ languages covered by the multilingual engines.
+- **Meeting mode.** Continuous transcription with chunked processing, speaker attribution, and export to Markdown, JSON, SRT, or VTT.
+
+### Native Linux integration
+
+- **Hyprland, Sway, River, GNOME, KDE.** Compositor keybindings everywhere, evdev fallback for X11, Wayland-first typing via wtype with full CJK support. Falls back through dotool → ydotool → clipboard if any layer is unavailable.
+- **Pauses your music.** Auto-pauses Spotify, Plasma media players, anything that speaks MPRIS the moment you start dictating. Resumes on release.
+- **Floating waveform OSD.** Matches your swayosd band by default — same vertical position as volume and brightness — so the level meter sits where you already look for system feedback.
+- **Interactive TUI configure.** `voxtype configure` (also surfaces in Walker / fuzzel / rofi) edits every option without touching config.toml. Auto-downloads missing models, swaps GPU binaries via pkexec, restarts the daemon for you.
+- **Push-to-talk or toggle.** Hold to record, or press once to start/stop. Optional audio cues when recording starts/stops.
+
+### Trust
+
+- **Local by default. No cloud. No subscription. No telemetry.** Optional remote Whisper servers when you want them. Your audio stays on your machine until you choose otherwise.
+- **MIT licensed.** AUR (`voxtype`, `voxtype-bin`), `.deb`, `.rpm`, Homebrew on macOS. Signed release binaries from a reproducible Docker pipeline.
 
 ## Quick Start
 
