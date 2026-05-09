@@ -128,6 +128,77 @@ Display the current configuration.
 voxtype config
 ```
 
+### `voxtype configure`
+
+Open an interactive terminal UI for editing every voxtype option. The TUI
+edits `~/.config/voxtype/config.toml` directly, preserves comments and
+unknown fields, and validates the file before swapping it in. Saving a
+change that would break the daemon's parser leaves the on-disk file
+untouched and reports the parse error.
+
+```bash
+voxtype configure
+```
+
+The TUI is also surfaced as a `.desktop` entry, so it shows up in Walker,
+fuzzel, rofi, KRunner, and GNOME Activities as **"Voxtype Configuration"**.
+The launcher script picks the first available terminal emulator (`$TERMINAL`,
+then ghostty / alacritty / kitty / foot / wezterm / konsole / xterm) and
+sets the window class to `voxtype` so compositors can float it.
+
+#### Sections
+
+| Section | What it covers |
+|---|---|
+| General | Active engine, variant binary, daemon status, hardware-aware variant recommendation |
+| Engine | Per-engine tuning for Whisper / Parakeet / Moonshine / SenseVoice / Paraformer / Dolphin / Omnilingual / Cohere |
+| Hotkey | PTT key, mode (PTT vs toggle), cancel key, modifier key, evdev-listener toggle |
+| Audio | Input device, max recording length, MPRIS-pause, audio feedback theme/volume |
+| Output | Mode (type/clipboard/paste/file), driver order, auto-submit, post-process command |
+| Text | Spoken-punctuation toggle, smart-auto-submit, custom replacements list editor |
+| VAD | Silero VAD enable, backend (auto/energy/whisper), threshold |
+| Meeting | Meeting mode enable, speaker diarization, audio source (mic/system/both) |
+| Notifications | Desktop notifications for recording start/stop and transcription |
+| Waybar | Status integration: icon theme + per-state icon overrides |
+| Advanced | GPU isolation, on-demand model loading, flash attention, eager processing, GPU device |
+
+#### Keyboard
+
+```
+Global         Tab / Esc focus toggle    ?  help overlay   q quit
+Sidebar        ↑↓ / jk navigate          Enter / → / l open section
+Section form   ↑↓ navigate fields        ←→ / hl cycle value
+               Space toggle              Enter / i edit text field
+               s save                    r revert
+Text editor    type insert               ←→ / Home / End / Ctrl-A/E
+               Backspace / Delete        Ctrl-W delete word
+               Ctrl-U clear              Enter commit / Esc cancel
+```
+
+Press `?` from anywhere in the TUI for the same reference as a popup.
+
+#### Hardware-aware recommendations
+
+The General section detects your CPU (AVX2 / AVX-512) and GPU (NVIDIA /
+AMD), then marks the recommended variant for each engine family with `★`.
+The About pane explains the choice (`"AMD GPU detected. The MIGraphX
+execution provider is new… ONNX (AVX-512) on CPU is the safe default."`).
+
+When you switch the engine on the Engine page, the TUI also picks the
+matching binary variant if one is needed (e.g. moving from Whisper to
+Parakeet swaps the symlink at `/usr/bin/voxtype` from a Whisper variant to
+an ONNX variant). The actual symlink change runs through `pkexec` so you
+get the standard polkit prompt.
+
+#### Compositor binding awareness
+
+If you have the evdev listener disabled and rely on compositor bindings,
+the Hotkey screen scans `~/.config/hypr/*.conf`, `~/.config/sway/config*`,
+and `~/.config/niri/config.kdl` for any `voxtype record` / `voxtype meeting`
+bindings, lists them in the About pane, and suggests config-format-specific
+snippets for any standard role you haven't bound (cancel, toggle, meeting
+start/stop). Suggestions skip key combos already in use by other actions.
+
 ### `voxtype status`
 
 Query the daemon's current state (for Waybar/Polybar integration).
@@ -642,6 +713,7 @@ Voxtype supports seven speech-to-text engines. Whisper uses whisper.cpp and work
 | **Paraformer** | Chinese + English dictation | No | Chinese (with English code-switching) |
 | **Dolphin** | Dictation-optimized, fast CTC | No | Chinese + English |
 | **Omnilingual** | Broadest language coverage in ONNX engines | No | 50+ languages |
+| **Cohere** | #1 Open ASR Leaderboard accuracy | Optional (CUDA via `cohere-cuda`) | Arabic, German, English, Spanish, French, Hindi, Italian, Japanese, Korean, Dutch, Portuguese, Russian, Turkish, Chinese (14) |
 
 ### Selecting an Engine
 
@@ -658,6 +730,7 @@ engine = "sensevoice"
 engine = "paraformer"
 engine = "dolphin"
 engine = "omnilingual"
+engine = "cohere"
 ```
 
 **Via CLI flag** (overrides config):
@@ -670,9 +743,10 @@ voxtype --engine sensevoice daemon
 voxtype --engine paraformer daemon
 voxtype --engine dolphin daemon
 voxtype --engine omnilingual daemon
+voxtype --engine cohere daemon
 ```
 
-Valid `--engine` values: `whisper`, `parakeet`, `moonshine`, `sensevoice`, `paraformer`, `dolphin`, `omnilingual`.
+Valid `--engine` values: `whisper`, `parakeet`, `moonshine`, `sensevoice`, `paraformer`, `dolphin`, `omnilingual`, `cohere`.
 
 ### Switching to an ONNX Engine
 
@@ -840,6 +914,46 @@ model = "omnilingual-large"  # Default model
 # threads = 4
 # on_demand_loading = false
 ```
+
+### Cohere Transcribe
+
+Cohere Transcribe is an encoder-decoder ASR model from Cohere Labs running via ONNX Runtime. It currently sits at #1 on the Open ASR Leaderboard. It offers:
+
+- Best-in-class accuracy on a wide range of audio (5.42 average WER on the leaderboard)
+- Support for 14 languages with a single model
+- Whisper-style task tokens for punctuation, capitalization, and inverse text normalization
+- Optional CUDA acceleration via the `cohere-cuda` feature
+
+The trade-off: it's the largest model voxtype ships at ~3.1 GB on disk for the int8 quantization. Plan accordingly on laptops with limited storage.
+
+**Requirements:**
+- An ONNX-enabled binary (`voxtype-*-onnx-*`)
+- ~3.1 GB free disk space for the model
+- The Cohere Transcribe model downloaded (`voxtype setup model`, then pick the Cohere section)
+
+**Configuration:**
+
+```toml
+engine = "cohere"
+
+[cohere]
+model = "cohere-transcribe-int8"  # Default model
+language = "en"                    # One of: ar, de, en, es, fr, hi, it, ja, ko, nl, pt, ru, tr, zh
+# threads = 4
+# on_demand_loading = false
+```
+
+**Supported languages:**
+
+Arabic (`ar`), German (`de`), English (`en`, default), Spanish (`es`), French (`fr`), Hindi (`hi`), Italian (`it`), Japanese (`ja`), Korean (`ko`), Dutch (`nl`), Portuguese (`pt`), Russian (`ru`), Turkish (`tr`), Mandarin Chinese (`zh`).
+
+**Installing:**
+
+```bash
+voxtype setup model      # Pick the Cohere section, confirm the size warning
+```
+
+The download fetches five files from the `cstr/cohere-transcribe-onnx-int8` HuggingFace repository (Apache 2.0 licensed, not gated): the encoder/decoder ONNX graphs, their weight sidecars, and `tokens.txt`.
 
 ---
 
@@ -1303,7 +1417,6 @@ Then record for 10+ seconds. You should see log messages like:
 ```
 
 ---
-
 ## Output Modes
 
 ### Type Mode (Default)
@@ -1521,6 +1634,45 @@ Or via environment variable for the whole session:
 ```bash
 VOXTYPE_SMART_AUTO_SUBMIT=true voxtype
 ```
+
+**Filter filler words ("uh", "um", ...):**
+
+Voxtype filters single-syllable filler words by default. To turn it off:
+
+```toml
+[text]
+filter_filler_words = false
+```
+
+When enabled (the default), Voxtype strips common filler words from each transcription before output and cleans up the surrounding punctuation. Word boundaries are respected, so "umbrella" and "summer" are untouched.
+
+```
+# You say:    "Well, um, I think we should ship it"
+# Voxtype types: "Well, I think we should ship it"
+```
+
+The default list contains single-syllable disfluencies: `uh`, `um`, `er`, `ah`, `eh`, `hmm`, `hm`, `mm`, `mhm`. Override it to add your own words:
+
+```toml
+[text]
+filter_filler_words = true
+filler_words = ["uh", "um", "er", "like", "you know"]
+```
+
+CLI flag (overrides config for the running daemon):
+
+```bash
+voxtype --filter-fillers       # force on
+voxtype --no-filter-fillers    # force off
+```
+
+Or via environment variable:
+
+```bash
+VOXTYPE_FILTER_FILLERS=true voxtype
+```
+
+The filter runs before `replacements` and the `[post_process]` LLM hook, so any custom replacements still apply on top of filtered text.
 
 **Shift+Enter for newlines:**
 

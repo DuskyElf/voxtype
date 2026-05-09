@@ -311,6 +311,13 @@ cargo install --git https://github.com/peteonrails/voxtype
 
 ## Post-Installation Setup
 
+> **Quick path**: most settings can be configured interactively with
+> `voxtype configure` (or by searching for "Voxtype Configuration" in
+> Walker / fuzzel / rofi / GNOME Activities). The steps below set up the
+> system-level pieces the TUI can't change for you (input-group membership,
+> typing backend, model download, daemon enable). See
+> [USER_MANUAL.md](USER_MANUAL.md#voxtype-configure) for the TUI keybindings.
+
 ### 1. Add user to input group
 
 Voxtype uses the Linux evdev subsystem to detect hotkeys, which requires `input` group membership:
@@ -346,7 +353,7 @@ sudo pacman -S ydotool
 # Ubuntu:
 sudo apt install ydotool
 
-# Enable and start the daemon (Arch)
+# Enable and start the daemon (Arch/Ubuntu)
 systemctl --user enable --now ydotool
 ```
 
@@ -366,7 +373,7 @@ For ydotool:
 ```bash
 # Install ydotool (see commands above for your distro)
 # Then enable and start the daemon (required!)
-systemctl --user enable --now ydotool  # Arch
+systemctl --user enable --now ydotool  # Arch/Ubuntu
 # For Fedora, see Troubleshooting guide for system service setup
 ```
 

@@ -24,8 +24,13 @@ pub mod worker;
     feature = "paraformer",
     feature = "dolphin",
     feature = "omnilingual",
+    feature = "cohere",
 ))]
 pub mod fbank;
+
+/// Shared GPU execution-provider registration for ONNX-based engines.
+#[cfg(feature = "onnx-common")]
+pub mod onnx_ep;
 
 /// Shared CTC greedy decoder for CTC-based ASR engines
 #[cfg(any(
@@ -33,6 +38,7 @@ pub mod fbank;
     feature = "paraformer",
     feature = "dolphin",
     feature = "omnilingual",
+    feature = "cohere",
 ))]
 pub mod ctc;
 
@@ -53,6 +59,15 @@ pub mod dolphin;
 
 #[cfg(feature = "omnilingual")]
 pub mod omnilingual;
+
+/// Cohere Transcribe backend (proof-of-concept, not wired into factory/CLI/config).
+/// See `src/transcribe/cohere.rs` for usage.
+#[cfg(feature = "cohere")]
+pub mod cohere;
+
+/// Cohere-specific log-mel feature extractor (NeMo conventions, 128 mels).
+#[cfg(feature = "cohere")]
+pub mod cohere_fbank;
 
 use crate::config::{Config, TranscriptionEngine, WhisperConfig, WhisperMode};
 use crate::error::TranscribeError;
@@ -199,6 +214,20 @@ pub fn create_transcriber(config: &Config) -> Result<Box<dyn Transcriber>, Trans
         #[cfg(not(feature = "omnilingual"))]
         TranscriptionEngine::Omnilingual => Err(TranscribeError::InitFailed(
             "Omnilingual engine requested but voxtype was not compiled with --features omnilingual"
+                .to_string(),
+        )),
+        #[cfg(feature = "cohere")]
+        TranscriptionEngine::Cohere => {
+            let cfg = config.cohere.as_ref().ok_or_else(|| {
+                TranscribeError::InitFailed(
+                    "Cohere engine selected but [cohere] config section is missing".to_string(),
+                )
+            })?;
+            Ok(Box::new(cohere::CohereTranscriber::new(cfg)?))
+        }
+        #[cfg(not(feature = "cohere"))]
+        TranscriptionEngine::Cohere => Err(TranscribeError::InitFailed(
+            "Cohere engine requested but voxtype was not compiled with --features cohere"
                 .to_string(),
         )),
     }

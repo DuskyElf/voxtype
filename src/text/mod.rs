@@ -18,6 +18,26 @@ pub struct TextProcessor {
     smart_auto_submit: bool,
     /// Pre-compiled regex for submit trigger detection
     submit_re: Regex,
+    /// Whether filler-word filtering is enabled
+    filter_filler_words: bool,
+    /// Pre-compiled regex matching any configured filler word.
+    /// `None` when the filter is disabled or the list is empty so the hot
+    /// path can early-out without touching regex.
+    filler_re: Option<Regex>,
+    /// Pre-compiled regex matching duplicate spaces left behind after
+    /// removing fillers. Compiled once even when the filter is off so
+    /// rebuilding the processor stays cheap.
+    filler_space_re: Regex,
+    /// Pre-compiled regex matching " ," / " ." / " ;" / " ?" etc. left
+    /// behind when a filler precedes attached punctuation.
+    filler_punct_re: Regex,
+    /// Pre-compiled regex matching duplicated punctuation like ", ," that
+    /// can appear after removing back-to-back fillers around commas.
+    filler_dup_punct_re: Regex,
+    /// Pre-compiled regex matching a connector punctuation (",;:") that ends
+    /// up directly before a sentence terminator (".!?") after filler removal,
+    /// e.g. "hello world, uh." -> "hello world,." -> "hello world.".
+    filler_connector_before_term_re: Regex,
 }
 
 impl TextProcessor {
@@ -35,17 +55,61 @@ impl TextProcessor {
         let submit_re = Regex::new(r"(?i)(?:^|\s)submit[.!?,;]*\s*$")
             .expect("BUG: submit regex is a compile-time constant and must be valid");
 
+        // Build a single alternation of all filler words. Word boundaries
+        // (\b) ensure "um" is removed without touching "umbrella" or "summer".
+        let filler_re = if config.filter_filler_words && !config.filler_words.is_empty() {
+            let alternation = config
+                .filler_words
+                .iter()
+                .filter(|w| !w.trim().is_empty())
+                .map(|w| regex::escape(w.trim()))
+                .collect::<Vec<_>>()
+                .join("|");
+            if alternation.is_empty() {
+                None
+            } else {
+                let pattern = format!(r"(?i)\b(?:{})\b", alternation);
+                Regex::new(&pattern).ok()
+            }
+        } else {
+            None
+        };
+
+        let filler_space_re = Regex::new(r" {2,}")
+            .expect("BUG: whitespace regex is a compile-time constant and must be valid");
+        let filler_punct_re = Regex::new(r" +([,.;:!?])")
+            .expect("BUG: punctuation regex is a compile-time constant and must be valid");
+        let filler_dup_punct_re = Regex::new(r"([,;:])(\s*[,;:])+").expect(
+            "BUG: duplicate-punctuation regex is a compile-time constant and must be valid",
+        );
+        let filler_connector_before_term_re = Regex::new(r"[,;:]+(\s*)([.!?])").expect(
+            "BUG: connector-before-terminator regex is a compile-time constant and must be valid",
+        );
+
         Self {
             spoken_punctuation: config.spoken_punctuation,
             replacements,
             smart_auto_submit: config.smart_auto_submit,
             submit_re,
+            filter_filler_words: config.filter_filler_words,
+            filler_re,
+            filler_space_re,
+            filler_punct_re,
+            filler_dup_punct_re,
+            filler_connector_before_term_re,
         }
     }
 
     /// Process text by applying all enabled transformations
     pub fn process(&self, text: &str) -> String {
         let mut result = text.to_string();
+
+        // Filter filler words first, on the raw transcription. Running before
+        // word_replacements lets users override the default list (e.g. by
+        // mapping "um" to itself) without needing to disable the filter.
+        if self.filter_filler_words {
+            result = self.apply_filler_filter(&result);
+        }
 
         // Apply replacements first so phrases containing spoken punctuation words
         // (e.g. "slash pr" → "/pr") match before those words are converted to
@@ -161,6 +225,52 @@ impl TextProcessor {
         result
     }
 
+    /// Remove filler words and clean up the punctuation/whitespace they leave
+    /// behind. Examples:
+    ///   "Well, um, I think"  -> "Well, I think"
+    ///   "uh hello"           -> "hello"
+    ///   "I think, uh."       -> "I think."
+    ///   "um uh hello"        -> "hello"
+    fn apply_filler_filter(&self, text: &str) -> String {
+        let Some(re) = &self.filler_re else {
+            return text.to_string();
+        };
+
+        // Replace each filler with a single space so the input
+        // "um, hello" becomes " , hello" and we can fold whitespace below.
+        let mut result = re.replace_all(text, " ").into_owned();
+
+        // Collapse "<space><punct>" to "<punct>" so " , hello" -> ", hello".
+        result = self.filler_punct_re.replace_all(&result, "$1").into_owned();
+
+        // Collapse runs like ",," or ", ," that appear when fillers sit
+        // between commas/semicolons/colons.
+        result = self
+            .filler_dup_punct_re
+            .replace_all(&result, "$1")
+            .into_owned();
+
+        // A connector ("," ";" ":") sitting directly before a sentence
+        // terminator (".!?") is dropped: "hello world, uh." starts as
+        // "hello world,." and should become "hello world.".
+        result = self
+            .filler_connector_before_term_re
+            .replace_all(&result, "$2")
+            .into_owned();
+
+        // Collapse multiple spaces left behind to a single space.
+        result = self.filler_space_re.replace_all(&result, " ").into_owned();
+
+        // Trim leading/trailing whitespace and dangling connector punctuation
+        // produced when fillers appeared at the start/end of the utterance.
+        result
+            .trim()
+            .trim_start_matches([',', ';', ':'])
+            .trim_start()
+            .trim_end_matches([',', ';', ':'])
+            .to_string()
+    }
+
     /// Apply custom word replacements (case-insensitive)
     fn apply_replacements(&self, text: &str) -> String {
         let mut result = text.to_string();
@@ -237,6 +347,7 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
             smart_auto_submit: false,
+            ..Default::default()
         }
     }
 
@@ -245,6 +356,7 @@ mod tests {
             spoken_punctuation,
             replacements: HashMap::new(),
             smart_auto_submit: true,
+            ..Default::default()
         }
     }
 
@@ -410,6 +522,7 @@ mod tests {
             spoken_punctuation: true,
             replacements: HashMap::new(),
             smart_auto_submit: true,
+            ..Default::default()
         };
         let processor = TextProcessor::new(&config);
 
@@ -428,6 +541,7 @@ mod tests {
             spoken_punctuation: true,
             replacements: HashMap::new(),
             smart_auto_submit: true,
+            ..Default::default()
         };
         let processor = TextProcessor::new(&config);
 
@@ -530,5 +644,167 @@ mod tests {
         let processor = TextProcessor::new(&config);
 
         assert_eq!(processor.process("dash dash"), "--");
+    }
+
+    fn make_filler_config(enabled: bool, words: Option<Vec<&str>>) -> TextConfig {
+        let filler_words = match words {
+            Some(words) => words.into_iter().map(String::from).collect(),
+            None => TextConfig::default().filler_words,
+        };
+        TextConfig {
+            filter_filler_words: enabled,
+            filler_words,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_filler_filter_enabled_by_default() {
+        // Filler-word filtering ships on by default. Existing users who want
+        // the old behavior must opt out via `filter_filler_words = false`.
+        let config = TextConfig::default();
+        assert!(config.filter_filler_words);
+
+        let processor = TextProcessor::new(&config);
+        assert_eq!(processor.process("um hello"), "hello");
+    }
+
+    #[test]
+    fn test_filler_filter_default_list() {
+        // Sanity-check the documented default list.
+        let config = TextConfig::default();
+        assert_eq!(
+            config.filler_words,
+            vec!["uh", "um", "er", "ah", "eh", "hmm", "hm", "mm", "mhm"]
+        );
+    }
+
+    #[test]
+    fn test_filler_filter_enabled_basic() {
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("um hello world"), "hello world");
+        assert_eq!(processor.process("hello uh world"), "hello world");
+        assert_eq!(processor.process("hello world um"), "hello world");
+    }
+
+    #[test]
+    fn test_filler_filter_case_insensitive() {
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("UM hello"), "hello");
+        assert_eq!(processor.process("Um hello"), "hello");
+        assert_eq!(processor.process("Hmm I see"), "I see");
+    }
+
+    #[test]
+    fn test_filler_filter_respects_word_boundaries() {
+        // The classic edge case: "um" inside "umbrella" must not be removed.
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("umbrella"), "umbrella");
+        assert_eq!(processor.process("an umbrella"), "an umbrella");
+        assert_eq!(processor.process("summer"), "summer");
+        assert_eq!(processor.process("hummingbird"), "hummingbird");
+        assert_eq!(processor.process("erase the file"), "erase the file");
+    }
+
+    #[test]
+    fn test_filler_filter_punctuation_cleanup_mid_sentence() {
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        // The canonical example from the brief.
+        assert_eq!(processor.process("Well, um, I think"), "Well, I think");
+    }
+
+    #[test]
+    fn test_filler_filter_punctuation_cleanup_start() {
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("um, hello world"), "hello world");
+        assert_eq!(processor.process("uh hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_filler_filter_punctuation_cleanup_end() {
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("hello world, um"), "hello world");
+        assert_eq!(processor.process("hello world, uh."), "hello world.");
+    }
+
+    #[test]
+    fn test_filler_filter_back_to_back_fillers() {
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("um uh hello"), "hello");
+        // Back-to-back fillers between commas collapse to a single comma:
+        // "hello [um], [uh], world" -> "hello, world". This matches the
+        // canonical "Well, um, I think" -> "Well, I think" treatment.
+        assert_eq!(processor.process("hello um, uh, world"), "hello, world");
+        assert_eq!(processor.process("um, uh, well"), "well");
+    }
+
+    #[test]
+    fn test_filler_filter_preserves_sentence_punctuation() {
+        let config = make_filler_config(true, None);
+        let processor = TextProcessor::new(&config);
+
+        // Sentence-final punctuation must survive even when a filler sits
+        // immediately before it.
+        assert_eq!(processor.process("hello um."), "hello.");
+        assert_eq!(processor.process("hello um!"), "hello!");
+        assert_eq!(processor.process("hello um?"), "hello?");
+    }
+
+    #[test]
+    fn test_filler_filter_custom_list() {
+        // Override the default list. "um" should now be preserved while
+        // "like" and "you know" are stripped.
+        let config = make_filler_config(true, Some(vec!["like", "you know"]));
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("um like hello"), "um hello");
+        assert_eq!(processor.process("hello you know world"), "hello world");
+    }
+
+    #[test]
+    fn test_filler_filter_empty_list_is_noop() {
+        // An empty list with the flag enabled should leave text untouched
+        // rather than panic when building the regex.
+        let config = make_filler_config(true, Some(vec![]));
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("um hello"), "um hello");
+    }
+
+    #[test]
+    fn test_filler_filter_runs_before_replacements() {
+        // If a user maps "uh" to "uhhh" via word_replacements, the filler
+        // filter strips "uh" first, so the replacement sees clean input.
+        let mut config = make_filler_config(true, None);
+        config
+            .replacements
+            .insert("hello".to_string(), "HELLO".to_string());
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("um hello uh world"), "HELLO world");
+    }
+
+    #[test]
+    fn test_filler_filter_with_spoken_punctuation() {
+        // Pipeline interaction: filler is removed first, then "period" -> ".".
+        let mut config = make_filler_config(true, None);
+        config.spoken_punctuation = true;
+        let processor = TextProcessor::new(&config);
+
+        assert_eq!(processor.process("well um I think period"), "well I think.");
     }
 }

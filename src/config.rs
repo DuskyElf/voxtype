@@ -239,6 +239,11 @@ on_recording_stop = false
 # Show notification with transcribed text after transcription completes
 on_transcription = true
 
+# Notification urgency level: "low", "normal", or "critical".
+# On GNOME, "low" notifications are delivered to the drawer without a popup banner.
+# Use "normal" (default) to ensure notifications appear as banners.
+# urgency = "normal"
+
 # [text]
 # Text processing options (word replacements, spoken punctuation)
 #
@@ -251,6 +256,12 @@ on_transcription = true
 # Smart auto-submit: say "submit" at the end of dictation to press Enter.
 # The word "submit" is stripped from the output text and Enter is pressed.
 # smart_auto_submit = false
+#
+# Remove filler words like "uh" and "um" from transcribed text.
+# Enabled by default. Set filter_filler_words = false to disable, or override
+# the word list via filler_words.
+# filter_filler_words = true
+# filler_words = ["uh", "um", "er", "ah", "eh", "hmm", "hm", "mm", "mhm"]
 
 # [vad]
 # Voice Activity Detection - filters silence-only recordings
@@ -296,6 +307,30 @@ on_transcription = true
 # post_process_command = "ollama run llama3.2:1b 'Format as code comment...'"
 # output_mode = "clipboard"
 "#;
+
+/// Return the default config content with platform-appropriate hotkey
+pub fn default_config_content() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        DEFAULT_CONFIG
+            .replace(
+                "key = \"SCROLLLOCK\"",
+                "key = \"FN\"",
+            )
+            .replace(
+                "# Common choices: SCROLLLOCK, PAUSE, RIGHTALT, F13-F24",
+                "# Common choices: FN, RIGHTALT, F13-F24",
+            )
+            .replace(
+                "# Use `evtest` to find key names for your keyboard",
+                "# FN (Globe key) is recommended on macOS",
+            )
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        DEFAULT_CONFIG.to_string()
+    }
+}
 
 /// Hotkey activation mode
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -346,6 +381,10 @@ pub struct Config {
     #[serde(default)]
     pub omnilingual: Option<OmnilingualConfig>,
 
+    /// Cohere Transcribe configuration (optional, only used when engine = "cohere")
+    #[serde(default)]
+    pub cohere: Option<CohereConfig>,
+
     /// Text processing configuration (replacements, spoken punctuation)
     #[serde(default)]
     pub text: TextConfig,
@@ -358,6 +397,11 @@ pub struct Config {
     /// Status display configuration (icons for Waybar/tray integrations)
     #[serde(default)]
     pub status: StatusConfig,
+
+    /// On-screen display visualizer configuration. Controls whether the
+    /// daemon spawns the `voxtype-osd` child and how it renders.
+    #[serde(default)]
+    pub osd: crate::osd::config::OsdConfig,
 
     /// Meeting transcription configuration
     #[serde(default)]
@@ -457,7 +501,14 @@ pub struct AudioFeedbackConfig {
 }
 
 fn default_hotkey_key() -> String {
-    "SCROLLLOCK".to_string()
+    #[cfg(target_os = "macos")]
+    {
+        "FN".to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "SCROLLLOCK".to_string()
+    }
 }
 
 fn default_sound_theme() -> String {
@@ -1035,6 +1086,49 @@ impl Default for MoonshineConfig {
     }
 }
 
+/// Cohere Transcribe speech-to-text configuration (ONNX-based, encoder-decoder).
+/// Requires: cargo build --features cohere
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CohereConfig {
+    /// Model name or directory containing the Cohere ONNX files.
+    /// Expects HuggingFace Optimum layout:
+    ///   encoder_model.onnx (+ .onnx_data),
+    ///   decoder_model_merged.onnx (+ .onnx_data),
+    ///   tokenizer.json
+    /// Short names: "cohere-transcribe-q4f16" (default, ~1.5 GB),
+    ///              "cohere-transcribe-q4", "cohere-transcribe-int8",
+    ///              "cohere-transcribe-fp16"
+    pub model: String,
+
+    /// Language for transcription. Two-letter ISO 639-1 codes
+    /// (e.g. "en", "fr", "de"). Cohere supports 14 languages.
+    #[serde(default = "default_cohere_language")]
+    pub language: String,
+
+    /// Number of CPU threads for ONNX Runtime inference
+    #[serde(default)]
+    pub threads: Option<usize>,
+
+    /// Load model on-demand when recording starts (true) or keep loaded (false)
+    #[serde(default = "default_on_demand_loading")]
+    pub on_demand_loading: bool,
+}
+
+fn default_cohere_language() -> String {
+    "en".to_string()
+}
+
+impl Default for CohereConfig {
+    fn default() -> Self {
+        Self {
+            model: "cohere-transcribe-q4f16".to_string(),
+            language: default_cohere_language(),
+            threads: None,
+            on_demand_loading: false,
+        }
+    }
+}
+
 /// SenseVoice speech-to-text configuration (ONNX-based, CTC encoder-only ASR)
 /// Requires: cargo build --features sensevoice
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1157,11 +1251,10 @@ impl Default for OmnilingualConfig {
 }
 
 /// Transcription engine selection (which ASR technology to use)
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TranscriptionEngine {
-    /// Use Whisper (whisper.cpp via whisper-rs) - default
-    #[default]
+    /// Use Whisper (whisper.cpp via whisper-rs)
     Whisper,
     /// Use Parakeet (NVIDIA's FastConformer via ONNX Runtime)
     /// Requires: cargo build --features parakeet
@@ -1181,6 +1274,10 @@ pub enum TranscriptionEngine {
     /// Use Omnilingual (FunASR 50+ language CTC encoder via ONNX Runtime)
     /// Requires: cargo build --features omnilingual
     Omnilingual,
+    /// Use Cohere Transcribe (encoder-decoder via ONNX Runtime, Whisper-style
+    /// task tokens). Top of the Open ASR Leaderboard.
+    /// Requires: cargo build --features cohere
+    Cohere,
 }
 
 /// VAD backend selection
@@ -1256,8 +1353,14 @@ impl Default for VadConfig {
     }
 }
 
+impl Default for TranscriptionEngine {
+    fn default() -> Self {
+        TranscriptionEngine::Whisper
+    }
+}
+
 /// Text processing configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TextConfig {
     /// Enable spoken punctuation conversion (e.g., "period" → ".")
     #[serde(default)]
@@ -1272,6 +1375,47 @@ pub struct TextConfig {
     /// The word "submit" is stripped from the output and Enter is pressed.
     #[serde(default)]
     pub smart_auto_submit: bool,
+
+    /// Remove common filler words ("uh", "um", etc.) from transcribed text.
+    /// Defaults to false to preserve existing behavior. The list is
+    /// configurable via `filler_words`.
+    #[serde(default)]
+    pub filter_filler_words: bool,
+
+    /// Words removed when `filter_filler_words` is true. Matched
+    /// case-insensitively on word boundaries; surrounding punctuation and
+    /// whitespace are cleaned up after removal.
+    #[serde(default = "default_filler_words")]
+    pub filler_words: Vec<String>,
+}
+
+impl Default for TextConfig {
+    fn default() -> Self {
+        Self {
+            spoken_punctuation: false,
+            replacements: HashMap::new(),
+            smart_auto_submit: false,
+            filter_filler_words: true,
+            filler_words: default_filler_words(),
+        }
+    }
+}
+
+/// Default filler-word list. Conservative: single-syllable disfluencies only.
+/// Multi-word phrases like "you know" or "sort of" are too aggressive for a
+/// default and can be added via the `filler_words` config.
+fn default_filler_words() -> Vec<String> {
+    vec![
+        "uh".to_string(),
+        "um".to_string(),
+        "er".to_string(),
+        "ah".to_string(),
+        "eh".to_string(),
+        "hmm".to_string(),
+        "hm".to_string(),
+        "mm".to_string(),
+        "mhm".to_string(),
+    ]
 }
 
 /// Meeting transcription configuration
@@ -1504,6 +1648,15 @@ pub struct NotificationConfig {
     /// Show engine icon in notification title (🦜 for Parakeet, 🗣️ for Whisper)
     #[serde(default)]
     pub show_engine_icon: bool,
+
+    /// Notification urgency level: "low", "normal", or "critical".
+    /// On GNOME, "low" notifications go straight to the drawer without a popup banner.
+    #[serde(default = "default_notification_urgency")]
+    pub urgency: String,
+}
+
+fn default_notification_urgency() -> String {
+    "normal".to_string()
 }
 
 impl Default for NotificationConfig {
@@ -1513,6 +1666,7 @@ impl Default for NotificationConfig {
             on_recording_stop: false,
             on_transcription: true,
             show_engine_icon: false,
+            urgency: default_notification_urgency(),
         }
     }
 }
@@ -1801,7 +1955,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             hotkey: HotkeyConfig {
-                key: "SCROLLLOCK".to_string(),
+                key: default_hotkey_key(),
                 modifiers: vec![],
                 mode: ActivationMode::default(),
                 enabled: true,
@@ -1873,9 +2027,11 @@ impl Default for Config {
             paraformer: None,
             dolphin: None,
             omnilingual: None,
+            cohere: None,
             text: TextConfig::default(),
             vad: VadConfig::default(),
             status: StatusConfig::default(),
+            osd: crate::osd::config::OsdConfig::default(),
             meeting: MeetingConfig::default(),
             state_file: Some("auto".to_string()),
             profiles: HashMap::new(),
@@ -1884,10 +2040,38 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Get the default config file path
+    /// System-wide config path used as a fallback when no user config exists.
+    pub const SYSTEM_PATH: &'static str = "/etc/voxtype/config.toml";
+
+    /// Get the default user config file path (XDG)
     pub fn default_path() -> Option<PathBuf> {
         directories::ProjectDirs::from("", "", "voxtype")
             .map(|dirs| dirs.config_dir().join("config.toml"))
+    }
+
+    /// Get the system-wide config file path.
+    pub fn system_path() -> PathBuf {
+        PathBuf::from(Self::SYSTEM_PATH)
+    }
+
+    /// Resolve which config file should actually be loaded, in priority order:
+    /// 1. User config (`~/.config/voxtype/config.toml`)
+    /// 2. System-wide config (`/etc/voxtype/config.toml`)
+    ///
+    /// Returns `None` if neither exists, in which case the caller should fall
+    /// back to built-in defaults. This does not consider the `--config` CLI
+    /// flag; callers handle that explicitly.
+    pub fn resolve_existing_path() -> Option<PathBuf> {
+        if let Some(user) = Self::default_path() {
+            if user.exists() {
+                return Some(user);
+            }
+        }
+        let system = Self::system_path();
+        if system.exists() {
+            return Some(system);
+        }
+        None
     }
 
     /// Get the runtime directory for ephemeral files (state, sockets)
@@ -1981,6 +2165,11 @@ impl Config {
                 .as_ref()
                 .map(|o| o.on_demand_loading)
                 .unwrap_or(false),
+            TranscriptionEngine::Cohere => self
+                .cohere
+                .as_ref()
+                .map(|c| c.on_demand_loading)
+                .unwrap_or(false),
         }
     }
 
@@ -2018,6 +2207,11 @@ impl Config {
                 .as_ref()
                 .map(|o| o.model.as_str())
                 .unwrap_or("omnilingual (not configured)"),
+            TranscriptionEngine::Cohere => self
+                .cohere
+                .as_ref()
+                .map(|c| c.model.as_str())
+                .unwrap_or("cohere (not configured)"),
         }
     }
 
@@ -2044,8 +2238,12 @@ pub fn load_config(path: Option<&Path>) -> Result<Config, VoxtypeError> {
     // Start with defaults
     let mut config = Config::default();
 
-    // Determine config file path
-    let config_path = path.map(PathBuf::from).or_else(Config::default_path);
+    // Determine config file path. If --config wasn't passed, walk the
+    // documented lookup chain: user config -> /etc/voxtype/config.toml.
+    let config_path = match path {
+        Some(p) => Some(PathBuf::from(p)),
+        None => Config::resolve_existing_path(),
+    };
 
     // Load from file if it exists
     if let Some(ref path) = config_path {
@@ -2059,6 +2257,10 @@ pub fn load_config(path: Option<&Path>) -> Result<Config, VoxtypeError> {
         } else {
             tracing::debug!("Config file not found at {:?}, using defaults", path);
         }
+    } else {
+        tracing::debug!(
+            "No config file found at user or system path, using built-in defaults"
+        );
     }
 
     // Override from environment variables
@@ -2086,6 +2288,7 @@ pub fn load_config(path: Option<&Path>) -> Result<Config, VoxtypeError> {
             "paraformer" => config.engine = TranscriptionEngine::Paraformer,
             "dolphin" => config.engine = TranscriptionEngine::Dolphin,
             "omnilingual" => config.engine = TranscriptionEngine::Omnilingual,
+            "cohere" => config.engine = TranscriptionEngine::Cohere,
             _ => tracing::warn!("Unknown VOXTYPE_ENGINE value: {}", engine),
         }
     }
@@ -2196,6 +2399,9 @@ pub fn load_config(path: Option<&Path>) -> Result<Config, VoxtypeError> {
     if let Ok(val) = std::env::var("VOXTYPE_SMART_AUTO_SUBMIT") {
         config.text.smart_auto_submit = parse_bool_env(&val);
     }
+    if let Ok(val) = std::env::var("VOXTYPE_FILTER_FILLERS") {
+        config.text.filter_filler_words = parse_bool_env(&val);
+    }
 
     Ok(config)
 }
@@ -2225,7 +2431,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.hotkey.key, "SCROLLLOCK");
+        assert_eq!(config.hotkey.key, default_hotkey_key());
         assert_eq!(config.hotkey.mode, ActivationMode::PushToTalk);
         assert_eq!(config.audio.sample_rate, 16000);
         assert!(!config.audio.feedback.enabled);
@@ -2293,7 +2499,7 @@ mod tests {
 
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(!config.hotkey.enabled);
-        assert_eq!(config.hotkey.key, "SCROLLLOCK"); // defaults to SCROLLLOCK
+        assert_eq!(config.hotkey.key, default_hotkey_key()); // platform default
     }
 
     #[test]
@@ -3775,5 +3981,43 @@ mod tests {
 
         let config: Config = toml::from_str(toml_str).unwrap();
         assert!(config.hotkey.profile_modifiers.is_empty());
+    }
+
+    #[test]
+    fn test_system_path_constant() {
+        assert_eq!(Config::system_path(), PathBuf::from("/etc/voxtype/config.toml"));
+        assert_eq!(Config::SYSTEM_PATH, "/etc/voxtype/config.toml");
+    }
+
+    #[test]
+    fn test_load_config_explicit_path() {
+        // Explicit --config should always be used regardless of fallback.
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+                [hotkey]
+                key = "F12"
+
+                [audio]
+                device = "default"
+                sample_rate = 16000
+                max_duration_secs = 30
+
+                [whisper]
+                model = "tiny.en"
+                language = "en"
+
+                [output]
+                mode = "clipboard"
+            "#,
+        )
+        .unwrap();
+
+        let config = load_config(Some(&config_path)).unwrap();
+        assert_eq!(config.hotkey.key, "F12");
+        assert_eq!(config.whisper.model, "tiny.en");
+        assert_eq!(config.output.mode, OutputMode::Clipboard);
     }
 }

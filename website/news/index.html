@@ -75,6 +75,215 @@
     <main class="news-content">
         <div class="container">
 
+            <!-- v0.7.x Era Posts -->
+
+            <article class="news-article" id="v070">
+                <div class="article-meta">
+                    <time datetime="2026-05-09">May 9, 2026</time>
+                    <span class="article-tag">Release</span>
+                </div>
+                <h2>v0.7.0: Cohere, macOS, on-screen visualizer, configuration TUI</h2>
+                <div class="article-body">
+                    <p>v0.7.0 is the largest release in the project's history. It adds Cohere Transcribe as the eighth ASR engine, brings full macOS support, ships a GTK4 on-screen visualizer that follows the swayosd convention, replaces the AMD GPU backend with MIGraphX, and introduces an interactive configuration TUI. 138 commits since v0.6.6.</p>
+
+                    <h3>Cohere Transcribe</h3>
+                    <p>The eighth transcription engine. Cohere's Transcribe model is a 1.6B-parameter multilingual ASR built on the Aya Expanse architecture. Voxtype ships int4 and fp16 quantizations downloadable via <code>voxtype setup model</code>.</p>
+
+                    <p><strong>Why use it:</strong> Best-in-class accuracy on accented English, code-switching between languages, and technical vocabulary. The int4 build is small enough to run on CPU; fp16 runs on GPU for sub-second latency.</p>
+
+                    <div class="code-block">
+                        <div class="code-header"><span>config.toml</span></div>
+                        <pre><code>engine = "cohere"
+
+[cohere]
+model = "cohere-transcribe-q4f16"</code></pre>
+                    </div>
+
+                    <p>On CUDA the encoder runs on GPU but the decoder is pinned to CPU pending an upstream ONNX Runtime fix. AMD MIGraphX users get full GPU acceleration end-to-end.</p>
+
+                    <h3>macOS support</h3>
+                    <p>Voxtype now runs on Apple Silicon. The release ships a signed <code>.dmg</code> with the daemon, a SwiftUI menubar app, and a setup wizard for accessibility permissions, model download, and the FN key hotkey.</p>
+
+                    <p><strong>Why use it:</strong> If you've been waiting for voxtype on a Mac, the wait is over. The macOS build uses Microsoft's prebuilt ONNX Runtime so all engines work, including Parakeet.</p>
+
+                    <div class="code-block">
+                        <div class="code-header"><span>Install via Homebrew</span></div>
+                        <pre><code>brew install --cask voxtype</code></pre>
+                    </div>
+
+                    <p>The macOS port was led by <a href="https://github.com/krystophny">krystophny</a>; thanks for the long arc of work to get it shipped.</p>
+
+                    <h3>On-screen visualizer</h3>
+                    <p>A new on-screen mic visualizer renders a live waveform aligned with the swayosd convention. Two frontends: GTK4 + gtk4-layer-shell, or native SCTK + wgpu + egui-wgpu. The daemon picks one based on <code>[osd] frontend</code> and spawns it automatically when the daemon starts.</p>
+
+                    <p><strong>Why use it:</strong> You know dictation is being captured without looking at the waybar. The waveform shows your voice level, fades when you stop talking, and disappears when transcription finishes.</p>
+
+                    <div class="code-block">
+                        <div class="code-header"><span>config.toml</span></div>
+                        <pre><code>[osd]
+enabled = true
+frontend = "gtk4"          # or "native"
+position = "bottom-center"
+top_margin = 0.85          # swayosd-aligned by default</code></pre>
+                    </div>
+
+                    <p>The daemon supervisor restarts the OSD on crash with exponential backoff so a misconfigured GTK theme or a Wayland reconnect doesn't lose the visualizer.</p>
+
+                    <h3>Configuration TUI</h3>
+                    <p>The new <code>voxtype configure</code> command opens an interactive terminal UI that edits every option in <code>~/.config/voxtype/config.toml</code> for you. The editor preserves comments and unknown fields via <code>toml_edit</code>, validates the result against the daemon's parser before writing, and rolls back if a change would prevent startup.</p>
+
+                    <p><strong>Why use it:</strong> Every option is discoverable. The TUI shows live state, warns when a chosen engine's binary isn't installed, and offers to download missing models or swap binary variants without leaving the editor.</p>
+
+                    <p>Search "Voxtype Configuration" in walker, fuzzel, rofi, KRunner, or GNOME Activities to launch it as a floating window. The launcher discovers an installed terminal emulator and applies a Hyprland <code>windowrulev2</code> for centered floating placement.</p>
+
+                    <h3>CUDA 12 / CUDA 13 split</h3>
+                    <p>NVIDIA users now get two ONNX binaries: <code>voxtype-onnx-cuda-12</code> (driver 525+, libcudart.so.12) and <code>voxtype-onnx-cuda-13</code> (driver 580+, libcudart.so.13). The AUR post-install hook detects your CUDA runtime via <code>ldconfig</code> and points <code>/usr/bin/voxtype</code> at the matching binary automatically.</p>
+
+                    <p><strong>Why use it:</strong> Rolling-distro users on CUDA 13 stop hitting <code>forward compatibility was attempted on non supported HW</code> errors. LTS users on CUDA 12 keep working without manually pinning a driver.</p>
+
+                    <h3>AMD: ROCm to MIGraphX</h3>
+                    <p>The AMD GPU execution provider changed. <code>parakeet-rocm</code> is now <code>parakeet-migraphx</code>, and <code>voxtype-onnx-rocm</code> is now <code>voxtype-onnx-migraphx</code>. The MIGraphX EP is built from source against ROCm 7.2.2, has better op coverage, and is the path nixpkgs is committing to.</p>
+
+                    <p><strong>Why use it:</strong> The legacy ROCm EP had upstream ORT compatibility issues that caused silent CPU fallback on Radeon RX 7000-class GPUs. MIGraphX runs Parakeet, Moonshine, SenseVoice, Cohere, and the rest of the ONNX stack with proper GPU acceleration.</p>
+
+                    <p>Three things to know:</p>
+                    <ul>
+                        <li>Requires ROCm 7.x. Older releases (5.x, 6.x) silently fall back to CPU.</li>
+                        <li>First inference compiles the model graph (~30-60s on RX 7000-class). Subsequent runs are fast.</li>
+                        <li>The <code>voxtype-onnx-rocm</code> name still works as a symlink for one release. Drop in v0.8.0.</li>
+                    </ul>
+
+                    <h3>Filler-word filtering</h3>
+                    <p>Built-in filler-word removal, on by default. Strips "um", "uh", "like", "you know", "basically", and similar fillers from transcribed text before output.</p>
+
+                    <p><strong>Why use it:</strong> Cleaner dictation without an LLM cleanup step. Combine with <code>post_process</code> for full LLM grammar fixes when you want them.</p>
+
+                    <h3>Eighth engine, eight binaries</h3>
+                    <p><strong>Engines (8):</strong> Whisper, Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, Omnilingual, Cohere<br>
+                    <strong>Binaries (8):</strong> avx2, avx512, vulkan, onnx-avx2, onnx-avx512, onnx-cuda-12, onnx-cuda-13, onnx-migraphx, plus voxtype-osd and voxtype-osd-gtk4</p>
+
+                    <p>The TUI's Engine section auto-swaps the binary when you pick an engine that the active variant doesn't support.</p>
+
+                    <h3>Other improvements</h3>
+                    <ul>
+                        <li><strong>AppImage packaging.</strong> Three variants (CPU, Vulkan, ONNX) for distros without native packages.</li>
+                        <li><strong>Niri compositor support</strong> in the supported compositor list and the TUI hotkey suggestion logic.</li>
+                        <li><strong>Wrapper script for /usr/bin/voxtype.</strong> GPU and ONNX variants now go through a wrapper that sets the right <code>argv[0]</code> for ORT's provider <code>.so</code> lookup, fixing a class of silent CPU-fallback bugs.</li>
+                        <li><strong>Mouse support and live keymap overlay (<code>?</code>) in the TUI.</strong></li>
+                        <li><strong>Configurable notification urgency</strong> per-event.</li>
+                        <li><strong>Live refresh</strong> of the General TUI section every 2 seconds while it's the active section.</li>
+                    </ul>
+
+                    <h3>Bug fixes</h3>
+                    <ul>
+                        <li>Status display now reports the real backend ("ONNX GPU (MIGraphX)") through the wrapper script. The waybar tooltip matches reality.</li>
+                        <li>TUI save no longer corrupts config files; save-on-exit prompt no longer infinite-loops on "discard".</li>
+                        <li><code>gpu_isolation</code> worker spawn moved off the async event loop so it doesn't stall hotkey detection during model load.</li>
+                        <li>ALSA stderr silenced during cpal device enumeration; daemon startup no longer prints spurious "ALSA lib pcm" warnings.</li>
+                        <li>Filler-word filter no longer strips legitimate words that contain filler substrings.</li>
+                        <li>Notification urgency level is now actually applied (was always "normal").</li>
+                        <li>TUI engine cycling correctly filters to engines the active binary supports.</li>
+                    </ul>
+
+                    <h3>Upgrading from 0.6.x</h3>
+                    <p>Most users on Arch (<code>voxtype-bin</code>), Debian (.deb), or Fedora (.rpm) will upgrade cleanly. Three things to know if you're a Parakeet user:</p>
+
+                    <p><strong>Binary renames.</strong> <code>voxtype-parakeet</code> becomes <code>voxtype-onnx-avx2</code> (or avx512). <code>voxtype-parakeet-cuda</code> becomes <code>voxtype-onnx-cuda-12</code> or <code>-13</code>. <code>voxtype-parakeet-rocm</code> becomes <code>voxtype-onnx-migraphx</code>. The AUR ships a <code>voxtype-onnx-rocm</code> compat symlink for one release. Custom user scripts hard-coding the old names will need updating.</p>
+
+                    <p><strong>MIGraphX requires ROCm 7.x.</strong> AMD users on ROCm 5.x or 6.x will silently fall back to CPU. Update to <code>rocm-hip-runtime</code> 7.x before upgrading.</p>
+
+                    <p><strong>CUDA 13 needs driver 580+.</strong> Rolling distros are usually fine. LTS users stay on cuda-12. The post-install hook picks the right binary automatically based on <code>ldconfig</code>'s libcudart SONAME.</p>
+
+                    <h3>Contributors</h3>
+                    <p>This release built on work by Peter Jackson, krystophny (macOS port), Antonio Zugaldia, and André Silva. Issue reports and design feedback from the Omarchy and Hyprland communities shaped the OSD positioning and the CUDA-12/13 split. Thanks to everyone who tested rc1, rc2, and rc3.</p>
+
+                    <p>Full changelog and signed binaries: <a href="https://github.com/peteonrails/voxtype/releases/tag/v0.7.0">v0.7.0 on GitHub</a>.</p>
+                </div>
+            </article>
+
+            <article class="news-article" id="v070rc2">
+                <div class="article-meta">
+                    <time datetime="2026-05-06">May 6, 2026</time>
+                    <span class="article-tag">Pre-release</span>
+                </div>
+                <h2>v0.7.0-rc2: Cohere Transcribe, macOS port, MIGraphX, configure TUI</h2>
+                <div class="article-body">
+                    <p>v0.7.0-rc2 is a community pre-release. It folds in three months of work across new ASR engines, an AMD GPU acceleration path, native macOS support, and a new interactive configuration TUI. Please install from the <a href="https://github.com/peteonrails/voxtype/releases/tag/v0.7.0-rc2">GitHub release</a> and report issues at <a href="https://github.com/peteonrails/voxtype/issues">github.com/peteonrails/voxtype/issues</a>.</p>
+
+                    <h3>Cohere Transcribe ASR engine</h3>
+                    <p>The Cohere Labs Transcribe model is now wired in as a first-class engine. It currently sits at #1 on the Open ASR Leaderboard. Whisper-style task tokens give it punctuation, capitalization, and inverse text normalization out of the box.</p>
+
+                    <p>This release ships four HuggingFace Optimum ONNX quantization variants. The default (<code>cohere-transcribe-q4f16</code>) is 1.5 GB and runs at 9-11x realtime on a Zen 4 CPU.</p>
+
+                    <div class="code-block">
+                        <div class="code-header"><span>Available models</span></div>
+                        <pre><code>cohere-transcribe-q4f16    1.5 GB   9-11x realtime   (default)
+cohere-transcribe-q4       2.0 GB   9-11x realtime
+cohere-transcribe-int8     2.9 GB   2-3x realtime
+cohere-transcribe-fp16     3.9 GB   7-8x realtime</code></pre>
+                    </div>
+
+                    <p><strong>Why use it:</strong> Cohere is the new top-of-the-leaderboard ASR model and we ship a 1.5 GB quantized variant that runs faster than realtime on commodity hardware. CUDA acceleration on the encoder gives a meaningful boost on longer dictations.</p>
+
+                    <h3>Native macOS port</h3>
+                    <p>Apple Silicon support via Microsoft ONNX Runtime. The macOS package includes:</p>
+                    <ul>
+                        <li>SwiftUI VoxtypeMenubar status bar app</li>
+                        <li>VoxtypeSetup wizard with sidebar settings layout</li>
+                        <li>Homebrew Cask + tap for prebuilt distribution</li>
+                        <li>FN / Globe key hotkey support</li>
+                        <li>App-bundle install path (supersedes the older launchd flow)</li>
+                    </ul>
+
+                    <p>Linux remains the primary platform. macOS arm64 ships as an additional artifact.</p>
+
+                    <p><strong>Credit:</strong> the macOS port comes from <a href="https://github.com/krystophny">krystophny</a>, who carried it from a personal fork to a release-ready feature branch.</p>
+
+                    <h3>MIGraphX for AMD GPUs</h3>
+                    <p>MIGraphX 7.2 replaces the older ROCm execution-provider path for Parakeet on AMD GPUs. Validated on Radeon RX 7000-series cards. The compatibility symlink <code>voxtype-onnx-rocm</code> ships through this release for users with scripts that reference the old name; it goes away in v0.8.0.</p>
+
+                    <p><strong>Note:</strong> MIGraphX 7.2 requires ROCm 7.x. Users on ROCm 5.x or 6.x will silently fall back to CPU. Check <code>rocm-smi</code> before upgrading if you depend on AMD GPU acceleration.</p>
+
+                    <h3>Two CUDA binaries</h3>
+                    <p>The previous single CUDA binary is now split into <code>voxtype-onnx-cuda-12</code> (NVIDIA driver 525+) and <code>voxtype-onnx-cuda-13</code> (NVIDIA driver 580+). The AUR PKGBUILD and <code>voxtype setup gpu --enable</code> symlink <code>voxtype-onnx-cuda</code> to whichever variant matches your runtime CUDA.</p>
+
+                    <p><strong>Why two:</strong> CUDA 13's runtime requires a newer NVIDIA driver than CUDA 12 does. Shipping both gives users on older drivers a working binary while still offering the latest CUDA toolchain to users on current drivers.</p>
+
+                    <h3>Interactive configure TUI</h3>
+                    <p>The new <code>voxtype configure</code> command opens an interactive terminal UI for editing every option in <code>config.toml</code>. It surfaces in Walker, fuzzel, and rofi as "Voxtype Configuration" so you can launch it from your usual app launcher.</p>
+
+                    <p>Behaviors that landed in this release:</p>
+                    <ul>
+                        <li>Engine cycle filters to engines for which an installed binary actually exists. No more saving an engine that the active binary cannot load.</li>
+                        <li>Save auto-swaps <code>/usr/bin/voxtype</code> to a binary that supports the chosen engine (via <code>pkexec</code>) and auto-downloads missing models via <code>voxtype setup model</code>.</li>
+                        <li>Save-on-exit prompt with Save / Discard / Cancel options so field edits are not lost on <code>q</code>.</li>
+                        <li><code>D</code> on the General section starts or restarts the user systemd unit so configuration changes take effect without leaving the TUI.</li>
+                    </ul>
+
+                    <p><strong>Why use it:</strong> No more hand-editing TOML. Pick an engine, pick a model, save. The TUI handles the binary swap and download orchestration so you do not end up in a broken state.</p>
+
+                    <h3>swayosd-aligned floating OSD</h3>
+                    <p>The optional waveform OSD (<code>voxtype-osd-gtk4</code>) now positions itself using fractional <code>top_margin</code> semantics that match swayosd. Default 0.85 puts the OSD in the same vertical band where your volume, brightness, and media-key feedback already render. Works across multi-monitor setups with different screen heights without per-monitor pixel tweaks.</p>
+
+                    <h3>Other changes</h3>
+                    <ul>
+                        <li>Cohere config table moved to the HuggingFace Optimum file layout. Pre-rc2 Cohere installs need to re-download via <code>voxtype setup model</code>.</li>
+                        <li>The default Cohere model is now <code>cohere-transcribe-q4f16</code> (was <code>cohere-transcribe-int8</code>).</li>
+                        <li>Status command now reports the real backend (e.g. <code>ONNX GPU (MIGraphX)</code>) through the wrapper-aware inventory machinery, rather than always showing <code>CPU (native)</code>.</li>
+                        <li>Roadmap reviewed: voxtype-models CDN and streaming transcription confirmed for v0.7.1.</li>
+                    </ul>
+
+                    <h3>Caveats for testers</h3>
+                    <ul>
+                        <li>The CUDA companion <code>.so</code> files (<code>libonnxruntime_providers_*.so</code>) must be installed in the same directory as the binary. The AUR <code>voxtype-bin</code> package handles this; manual installs need the matching layout under <code>/usr/lib/voxtype/cuda-12|cuda-13|migraphx/</code>.</li>
+                        <li>Cohere's CUDA decoder still falls through to CPU pending an ONNX Runtime kernel update. Encoder-only acceleration on this release.</li>
+                        <li>Parakeet users upgrading from 0.6.x: please read the GitHub release notes for the binary-rename and ROCm-version details.</li>
+                    </ul>
+
+                    <p>Full changelog and signed binaries: <a href="https://github.com/peteonrails/voxtype/releases/tag/v0.7.0-rc2">v0.7.0-rc2 on GitHub</a>.</p>
+                </div>
+            </article>
+
             <!-- v0.6.x Era Posts -->
 
             <article class="news-article" id="v066">

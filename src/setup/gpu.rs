@@ -17,6 +17,7 @@
 //!
 //! This sets VK_LOADER_DRIVERS_SELECT internally to filter Vulkan ICDs.
 
+use super::binary::install_active_binary;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::Path;
@@ -27,6 +28,7 @@ const VOXTYPE_BIN: &str = "/usr/bin/voxtype";
 const VOXTYPE_BIN_LOCAL: &str = "/usr/local/bin/voxtype";
 const VOXTYPE_CPU_BACKUP: &str = "/usr/lib/voxtype/voxtype-cpu";
 const VOXTYPE_NATIVE: &str = "/usr/lib/voxtype/voxtype-native";
+
 
 /// Get the active voxtype binary path (prefers /usr/bin, falls back to /usr/local/bin)
 fn get_active_binary_path() -> &'static str {
@@ -351,30 +353,7 @@ fn switch_backend_tiered(backend: Backend) -> anyhow::Result<()> {
         );
     }
 
-    // Remove existing symlink
-    if Path::new(active_bin).exists() || fs::symlink_metadata(active_bin).is_ok() {
-        fs::remove_file(active_bin).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to remove existing symlink (need sudo?): {}\n\
-                 Try: sudo voxtype setup gpu --enable",
-                e
-            )
-        })?;
-    }
-
-    // Create new symlink
-    symlink(&binary_path, active_bin).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to create symlink (need sudo?): {}\n\
-             Try: sudo voxtype setup gpu --enable",
-            e
-        )
-    })?;
-
-    // Restore SELinux context if available
-    let _ = Command::new("restorecon").arg(active_bin).status();
-
-    Ok(())
+    install_active_binary(active_bin, &binary_path)
 }
 
 /// Enable GPU in simple mode (switch symlink from native to vulkan)
@@ -522,8 +501,11 @@ pub fn show_status() {
             let display_name = match target.as_str() {
                 "voxtype-onnx-avx2" | "voxtype-parakeet-avx2" => "ONNX CPU (AVX2)",
                 "voxtype-onnx-avx512" | "voxtype-parakeet-avx512" => "ONNX CPU (AVX-512)",
-                "voxtype-onnx-cuda" | "voxtype-parakeet-cuda" => "ONNX GPU (CUDA)",
-                "voxtype-onnx-rocm" | "voxtype-parakeet-rocm" => "ONNX GPU (ROCm)",
+                "voxtype-onnx-cuda-12" => "ONNX GPU (CUDA 12)",
+                "voxtype-onnx-cuda-13" => "ONNX GPU (CUDA 13)",
+                "voxtype-onnx-cuda" | "voxtype-parakeet-cuda" => "ONNX GPU (CUDA, unversioned)",
+                "voxtype-onnx-migraphx" => "ONNX GPU (MIGraphX)",
+                "voxtype-onnx-rocm" | "voxtype-parakeet-rocm" => "ONNX GPU (MIGraphX, legacy name)",
                 _ => "ONNX (unknown variant)",
             };
             println!("Active backend: {}", display_name);
@@ -575,8 +557,9 @@ pub fn show_status() {
         let onnx_backends = [
             ("voxtype-onnx-avx2", "voxtype-parakeet-avx2", "ONNX CPU (AVX2)"),
             ("voxtype-onnx-avx512", "voxtype-parakeet-avx512", "ONNX CPU (AVX-512)"),
-            ("voxtype-onnx-cuda", "voxtype-parakeet-cuda", "ONNX GPU (CUDA)"),
-            ("voxtype-onnx-rocm", "voxtype-parakeet-rocm", "ONNX GPU (ROCm)"),
+            ("voxtype-onnx-cuda-12", "voxtype-onnx-cuda", "ONNX GPU (CUDA 12)"),
+            ("voxtype-onnx-cuda-13", "voxtype-onnx-cuda-13", "ONNX GPU (CUDA 13)"),
+            ("voxtype-onnx-migraphx", "voxtype-onnx-rocm", "ONNX GPU (MIGraphX)"),
         ];
 
         // Get current symlink target
@@ -685,7 +668,7 @@ pub fn show_status() {
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()));
         let is_gpu_active = current_target
             .as_ref()
-            .map(|t| t.contains("cuda") || t.contains("rocm"))
+            .map(|t| t.contains("cuda") || t.contains("migraphx") || t.contains("rocm"))
             .unwrap_or(false);
 
         if !is_gpu_active && detect_best_parakeet_gpu_backend().is_some() {
@@ -708,7 +691,7 @@ pub fn show_status() {
 fn detect_best_parakeet_gpu_backend() -> Option<(&'static str, &'static str)> {
     let gpus = detect_gpus();
 
-    // The CUDA and ROCm binaries bundle ONNX Runtime which contains AVX-512
+    // The CUDA and MIGraphX binaries bundle ONNX Runtime which contains AVX-512
     // instructions. On CPUs without AVX-512 (e.g., Zen 3), these binaries will
     // crash with SIGILL. Only select GPU backends if the CPU supports AVX-512.
     let has_avx512 = fs::read_to_string("/proc/cpuinfo")
@@ -720,51 +703,70 @@ fn detect_best_parakeet_gpu_backend() -> Option<(&'static str, &'static str)> {
     }
 
     // Helper to find installed binary, preferring new name over legacy
-    let find_binary =
-        |new_name: &'static str, legacy_name: &'static str| -> Option<&'static str> {
-            if Path::new(VOXTYPE_LIB_DIR).join(new_name).exists() {
-                Some(new_name)
-            } else if Path::new(VOXTYPE_LIB_DIR).join(legacy_name).exists() {
-                Some(legacy_name)
-            } else {
-                None
-            }
-        };
+    let find_binary = |new_name: &'static str, legacy_name: &'static str| -> Option<&'static str> {
+        if Path::new(VOXTYPE_LIB_DIR).join(new_name).exists() {
+            Some(new_name)
+        } else if Path::new(VOXTYPE_LIB_DIR).join(legacy_name).exists() {
+            Some(legacy_name)
+        } else {
+            None
+        }
+    };
 
-    // Check for AMD GPU and ROCm binary
+    // Check for AMD GPU and MIGraphX binary (legacy "rocm" name accepted via symlink)
     let has_amd = gpus.iter().any(|g| g.vendor == GpuVendor::Amd);
-    if let Some(binary) = find_binary("voxtype-onnx-rocm", "voxtype-parakeet-rocm") {
+    if let Some(binary) = find_binary("voxtype-onnx-migraphx", "voxtype-onnx-rocm") {
         if has_amd {
-            return Some((binary, "ROCm"));
+            return Some((binary, "MIGraphX"));
         }
     }
 
-    // Check for NVIDIA GPU and CUDA binary
+    // Check for NVIDIA GPU and CUDA binary. v0.7.0 splits cuda into -12 and
+    // -13 variants; pick the one matching the host's CUDA runtime so ort's
+    // bundled libonnxruntime_providers_cuda.so (built against a fixed CUDA
+    // ABI) doesn't fail to register at runtime. Mismatched pairings would
+    // silently fall back to CPU.
     let has_nvidia = gpus.iter().any(|g| g.vendor == GpuVendor::Nvidia);
-    if let Some(binary) = find_binary("voxtype-onnx-cuda", "voxtype-parakeet-cuda") {
-        if has_nvidia {
-            return Some((binary, "CUDA"));
+    if has_nvidia {
+        let host_cuda_major = crate::setup::parakeet::detect_cuda_runtime_major();
+        let cuda_pref: &[&str] = match host_cuda_major {
+            Some(13) => &["voxtype-onnx-cuda-13", "voxtype-onnx-cuda"],
+            Some(12) => &["voxtype-onnx-cuda-12", "voxtype-onnx-cuda"],
+            // No detection — try cu13 first (rolling-distro default), then cu12
+            _ => &["voxtype-onnx-cuda-13", "voxtype-onnx-cuda-12", "voxtype-onnx-cuda"],
+        };
+        for name in cuda_pref {
+            if Path::new(VOXTYPE_LIB_DIR).join(name).exists() {
+                let label = match host_cuda_major {
+                    Some(13) => "CUDA 13",
+                    Some(12) => "CUDA 12",
+                    _ => "CUDA",
+                };
+                return Some((*name, label));
+            }
         }
     }
 
     // Fall back to whichever is installed (user may have external GPU)
-    if let Some(binary) = find_binary("voxtype-onnx-rocm", "voxtype-parakeet-rocm") {
-        return Some((binary, "ROCm"));
+    if let Some(binary) = find_binary("voxtype-onnx-migraphx", "voxtype-onnx-rocm") {
+        return Some((binary, "MIGraphX"));
     }
-    if let Some(binary) = find_binary("voxtype-onnx-cuda", "voxtype-parakeet-cuda") {
-        return Some((binary, "CUDA"));
+    for name in ["voxtype-onnx-cuda-13", "voxtype-onnx-cuda-12", "voxtype-onnx-cuda"] {
+        if Path::new(VOXTYPE_LIB_DIR).join(name).exists() {
+            return Some((name, "CUDA"));
+        }
     }
 
     None
 }
 
-/// Enable GPU backend (engine-aware: Vulkan for Whisper, CUDA/ROCm for Parakeet)
+/// Enable GPU backend (engine-aware: Vulkan for Whisper, CUDA/MIGraphX for Parakeet)
 pub fn enable() -> anyhow::Result<()> {
     // Check which engine is active by looking at the current symlink
     let is_parakeet = is_parakeet_binary_active();
 
     if is_parakeet {
-        // Parakeet mode: switch to best available GPU backend (CUDA or ROCm)
+        // Parakeet mode: switch to best available GPU backend (CUDA or MIGraphX)
         let (backend_binary, backend_name) = detect_best_parakeet_gpu_backend().ok_or_else(|| {
             let gpus = detect_gpus();
             let has_amd = gpus.iter().any(|g| g.vendor == GpuVendor::Amd);
@@ -774,18 +776,19 @@ pub fn enable() -> anyhow::Result<()> {
                 .unwrap_or(false);
 
             let hint = if (has_amd || has_nvidia) && !has_avx512 {
-                "You have a GPU, but the ONNX GPU binaries (CUDA/ROCm) require a CPU with \
+                "You have a GPU, but the ONNX GPU binaries (CUDA/MIGraphX) require a CPU with \
                  AVX-512 support. Your CPU only supports AVX2.\n\n\
                  Use ONNX on CPU instead:\n  \
                  sudo ln -sf /usr/lib/voxtype/voxtype-onnx-avx2 /usr/bin/voxtype\n\n\
                  Or use the Whisper engine with Vulkan GPU acceleration:\n  \
                  voxtype setup onnx --disable && sudo voxtype setup gpu --enable"
             } else if has_amd {
-                "You have an AMD GPU. Install voxtype-onnx-rocm for GPU acceleration."
+                "You have an AMD GPU. Install voxtype-onnx-migraphx for GPU acceleration."
             } else if has_nvidia {
-                "You have an NVIDIA GPU. Install voxtype-onnx-cuda for GPU acceleration."
+                "You have an NVIDIA GPU. Install voxtype-onnx-cuda-12 (for CUDA 12.x) or \
+                 voxtype-onnx-cuda-13 (for CUDA 13.x) for GPU acceleration."
             } else {
-                "No supported GPU detected. ONNX GPU acceleration requires NVIDIA (CUDA) or AMD (ROCm)."
+                "No supported GPU detected. ONNX GPU acceleration requires NVIDIA (CUDA) or AMD (MIGraphX)."
             };
 
             anyhow::anyhow!(
@@ -924,23 +927,20 @@ fn detect_best_cpu_backend() -> Backend {
 /// Detect the best ONNX CPU backend for this system
 fn detect_best_parakeet_cpu_backend() -> Option<&'static str> {
     // Helper to find installed binary, preferring new name over legacy
-    let find_binary =
-        |new_name: &'static str, legacy_name: &'static str| -> Option<&'static str> {
-            if Path::new(VOXTYPE_LIB_DIR).join(new_name).exists() {
-                Some(new_name)
-            } else if Path::new(VOXTYPE_LIB_DIR).join(legacy_name).exists() {
-                Some(legacy_name)
-            } else {
-                None
-            }
-        };
+    let find_binary = |new_name: &'static str, legacy_name: &'static str| -> Option<&'static str> {
+        if Path::new(VOXTYPE_LIB_DIR).join(new_name).exists() {
+            Some(new_name)
+        } else if Path::new(VOXTYPE_LIB_DIR).join(legacy_name).exists() {
+            Some(legacy_name)
+        } else {
+            None
+        }
+    };
 
     // Check for AVX-512 support
     if let Ok(cpuinfo) = fs::read_to_string("/proc/cpuinfo") {
         if cpuinfo.contains("avx512f") {
-            if let Some(binary) =
-                find_binary("voxtype-onnx-avx512", "voxtype-parakeet-avx512")
-            {
+            if let Some(binary) = find_binary("voxtype-onnx-avx512", "voxtype-parakeet-avx512") {
                 return Some(binary);
             }
         }
@@ -963,28 +963,5 @@ fn switch_backend_tiered_parakeet(binary_name: &str) -> anyhow::Result<()> {
         );
     }
 
-    // Remove existing symlink
-    if Path::new(active_bin).exists() || fs::symlink_metadata(active_bin).is_ok() {
-        fs::remove_file(active_bin).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to remove existing symlink (need sudo?): {}\n\
-                 Try: sudo voxtype setup gpu --enable",
-                e
-            )
-        })?;
-    }
-
-    // Create new symlink
-    symlink(&binary_path, active_bin).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to create symlink (need sudo?): {}\n\
-             Try: sudo voxtype setup gpu --enable",
-            e
-        )
-    })?;
-
-    // Restore SELinux context if available
-    let _ = Command::new("restorecon").arg(active_bin).status();
-
-    Ok(())
+    install_active_binary(active_bin, &binary_path)
 }

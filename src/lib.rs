@@ -75,18 +75,27 @@ pub mod cpu;
 pub mod daemon;
 pub mod eager;
 pub mod error;
+#[cfg(target_os = "linux")]
 pub mod hotkey;
+#[cfg(target_os = "macos")]
+pub mod hotkey_macos;
 pub mod meeting;
+#[cfg(target_os = "macos")]
+pub mod menubar;
 pub mod model_manager;
+pub mod notification;
+pub mod osd;
 pub mod output;
 pub mod setup;
 pub mod state;
 pub mod text;
 pub mod transcribe;
+pub mod tui;
 pub mod vad;
 
 pub use cli::{
-    Cli, Commands, CompositorType, MeetingAction, OutputModeOverride, RecordAction, SetupAction,
+    Cli, Commands, CompositorType, InfoAction, MeetingAction, OutputModeOverride, RecordAction,
+    SetupAction,
 };
 pub use config::Config;
 pub use daemon::Daemon;

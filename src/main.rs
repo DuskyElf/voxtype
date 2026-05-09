@@ -6,10 +6,11 @@
 
 use clap::Parser;
 use std::path::PathBuf;
-use std::process::Command;
 use tracing_subscriber::EnvFilter;
+#[cfg(target_os = "macos")]
+use voxtype::menubar;
 use voxtype::{
-    config, cpu, daemon, meeting, setup, transcribe, vad, Cli, Commands, MeetingAction,
+    config, cpu, daemon, meeting, setup, transcribe, vad, Cli, Commands, InfoAction, MeetingAction,
     RecordAction, SetupAction,
 };
 
@@ -88,8 +89,13 @@ async fn main() -> anyhow::Result<()> {
             .init();
     }
 
-    // Load configuration
-    let config_path = cli.config.clone().or_else(config::Config::default_path);
+    // Load configuration. config_path tracks the file we actually loaded (or
+    // would load), so subprocess transcribers can reuse the same source.
+    let config_path = cli
+        .config
+        .clone()
+        .or_else(config::Config::resolve_existing_path)
+        .or_else(config::Config::default_path);
     let mut config = config::load_config(cli.config.as_deref())?;
 
     // Apply CLI overrides
@@ -116,14 +122,11 @@ async fn main() -> anyhow::Result<()> {
                 model,
                 default_model
             );
-            let _ = Command::new("notify-send")
-                .args([
-                    "--app-name=Voxtype",
-                    "--expire-time=5000",
-                    "Voxtype: Invalid Model",
-                    &format!("Unknown model '{}', using '{}'", model, default_model),
-                ])
-                .spawn();
+            // Send desktop notification
+            voxtype::notification::send_sync(
+                "Voxtype: Invalid Model",
+                &format!("Unknown model '{}', using '{}'", model, default_model),
+            );
         }
     }
     if let Some(engine) = cli.engine {
@@ -135,9 +138,10 @@ async fn main() -> anyhow::Result<()> {
             "paraformer" => config.engine = config::TranscriptionEngine::Paraformer,
             "dolphin" => config.engine = config::TranscriptionEngine::Dolphin,
             "omnilingual" => config.engine = config::TranscriptionEngine::Omnilingual,
+            "cohere" => config.engine = config::TranscriptionEngine::Cohere,
             _ => {
                 eprintln!(
-                    "Error: Invalid engine '{}'. Valid options: whisper, parakeet, moonshine, sensevoice, paraformer, dolphin, omnilingual",
+                    "Error: Invalid engine '{}'. Valid options: whisper, parakeet, moonshine, sensevoice, paraformer, dolphin, omnilingual, cohere",
                     engine
                 );
                 std::process::exit(1);
@@ -292,6 +296,12 @@ async fn main() -> anyhow::Result<()> {
     if cli.spoken_punctuation {
         config.text.spoken_punctuation = true;
     }
+    if cli.filter_fillers {
+        config.text.filter_filler_words = true;
+    }
+    if cli.no_filter_fillers {
+        config.text.filter_filler_words = false;
+    }
     if let Some(keys) = cli.paste_keys {
         config.output.paste_keys = Some(keys);
     }
@@ -352,11 +362,73 @@ async fn main() -> anyhow::Result<()> {
         config.vad.min_speech_duration_ms = min_speech;
     }
 
+    // On macOS, detect if launched as app bundle executable (no subcommand, binary inside .app)
+    #[cfg(target_os = "macos")]
+    let default_command = if cli.command.is_none() {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.to_str().map(|s| s.contains(".app/Contents/MacOS/")))
+            .unwrap_or(false)
+            .then_some(Commands::AppLaunch)
+            .unwrap_or(Commands::Daemon)
+    } else {
+        Commands::Daemon // unused, cli.command is Some
+    };
+    #[cfg(not(target_os = "macos"))]
+    let default_command = Commands::Daemon;
+
     // Run the appropriate command
-    match cli.command.unwrap_or(Commands::Daemon) {
+    match cli.command.unwrap_or(default_command) {
         Commands::Daemon => {
             let mut daemon = daemon::Daemon::new(config, config_path);
             daemon.run().await?;
+        }
+        #[cfg(target_os = "macos")]
+        Commands::Menubar => {
+            let state_file = config
+                .resolve_state_file()
+                .ok_or_else(|| anyhow::anyhow!("state_file not configured"))?;
+            menubar::run(state_file);
+            // Note: menubar::run() never returns (runs macOS event loop)
+        }
+        #[cfg(target_os = "macos")]
+        Commands::AppLaunch => {
+            // Launched by Voxtype.app: start daemon in background, run menubar in foreground.
+            // The binary must be the CFBundleExecutable (not exec'd from a wrapper script)
+            // so macOS Control Center can register the status bar scene correctly.
+            let logs_dir = dirs::home_dir()
+                .map(|h| h.join("Library/Logs/voxtype"))
+                .unwrap_or_else(|| std::path::PathBuf::from("/tmp/voxtype"));
+            let _ = std::fs::create_dir_all(&logs_dir);
+
+            // First-launch auto-setup: create config and download model if needed
+            first_launch_setup(&config).await;
+
+            // Kill any existing instances
+            let _ = std::process::Command::new("pkill")
+                .args(["-9", "-f", "voxtype-bin daemon"])
+                .status();
+            let _ = std::process::Command::new("pkill")
+                .args(["-9", "-f", "voxtype-bin menubar"])
+                .status();
+            let _ = std::fs::remove_file("/tmp/voxtype/voxtype.lock");
+            let _ = std::fs::remove_file("/tmp/voxtype/menubar.lock");
+
+            // Start daemon as a child process with logging
+            let exe = std::env::current_exe()?;
+            let stdout = std::fs::File::create(logs_dir.join("stdout.log"))?;
+            let stderr = std::fs::File::create(logs_dir.join("stderr.log"))?;
+            let _daemon = std::process::Command::new(&exe)
+                .arg("daemon")
+                .stdout(stdout)
+                .stderr(stderr)
+                .spawn()?;
+
+            // Run menubar in this process (keeps the app alive with menu bar icon)
+            let state_file = config
+                .resolve_state_file()
+                .ok_or_else(|| anyhow::anyhow!("state_file not configured"))?;
+            menubar::run(state_file);
         }
 
         Commands::Transcribe { file, engine } => {
@@ -369,8 +441,9 @@ async fn main() -> anyhow::Result<()> {
                     "paraformer" => config.engine = config::TranscriptionEngine::Paraformer,
                     "dolphin" => config.engine = config::TranscriptionEngine::Dolphin,
                     "omnilingual" => config.engine = config::TranscriptionEngine::Omnilingual,
+                    "cohere" => config.engine = config::TranscriptionEngine::Cohere,
                     _ => {
-                        eprintln!("Error: Invalid engine '{}'. Valid options: whisper, parakeet, moonshine, sensevoice, paraformer, dolphin, omnilingual", engine_name);
+                        eprintln!("Error: Invalid engine '{}'. Valid options: whisper, parakeet, moonshine, sensevoice, paraformer, dolphin, omnilingual, cohere", engine_name);
                         std::process::exit(1);
                     }
                 }
@@ -425,6 +498,39 @@ async fn main() -> anyhow::Result<()> {
                     } else {
                         setup::systemd::install().await?;
                     }
+                }
+                #[cfg(target_os = "macos")]
+                Some(SetupAction::Launchd { uninstall, status }) => {
+                    if status {
+                        setup::launchd::status().await?;
+                    } else if uninstall {
+                        setup::launchd::uninstall().await?;
+                    } else {
+                        setup::launchd::install().await?;
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                Some(SetupAction::AppBundle { uninstall, status }) => {
+                    if status {
+                        setup::app_bundle::status().await?;
+                    } else if uninstall {
+                        setup::app_bundle::uninstall().await?;
+                    } else {
+                        setup::app_bundle::install().await?;
+                    }
+                }
+                #[cfg(target_os = "macos")]
+                Some(SetupAction::Hammerspoon {
+                    install,
+                    show,
+                    hotkey,
+                    toggle,
+                }) => {
+                    setup::hammerspoon::run(install, show, &hotkey, toggle).await?;
+                }
+                #[cfg(target_os = "macos")]
+                Some(SetupAction::Macos) => {
+                    setup::macos::run().await?;
                 }
                 Some(SetupAction::Waybar {
                     json,
@@ -487,6 +593,20 @@ async fn main() -> anyhow::Result<()> {
                         setup::gpu::show_status();
                     }
                 }
+                Some(SetupAction::Variant { to }) => {
+                    let variant = setup::binary::Variant::from_binary_name(&to)
+                        .ok_or_else(|| anyhow::anyhow!(
+                            "Unknown variant '{}'. Expected one of: {}",
+                            to,
+                            setup::binary::Variant::ALL
+                                .iter()
+                                .map(|v| v.binary_name())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ))?;
+                    setup::binary::switch_to(variant)?;
+                    println!("Switched /usr/bin/voxtype to {}.", variant.binary_name());
+                }
                 Some(SetupAction::Onnx {
                     enable,
                     disable,
@@ -534,6 +654,14 @@ async fn main() -> anyhow::Result<()> {
             show_config(&config).await?;
         }
 
+        Commands::Info { action } => {
+            run_info_command(action)?;
+        }
+
+        Commands::Configure { force_package_mode } => {
+            voxtype::tui::run(force_package_mode)?;
+        }
+
         Commands::Status {
             follow,
             format,
@@ -550,6 +678,193 @@ async fn main() -> anyhow::Result<()> {
         Commands::Meeting { action } => {
             run_meeting_command(&config, action).await?;
         }
+
+        Commands::CheckUpdate => {
+            check_for_updates().await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// First-launch auto-setup for macOS app bundle launches.
+///
+/// Detects if this is the first launch by checking for a config file and downloaded model.
+/// If either is missing, creates default config and downloads the recommended model
+/// so the user can start recording immediately after granting permissions.
+#[cfg(target_os = "macos")]
+async fn first_launch_setup(_config: &config::Config) {
+
+    // Check if config file exists
+    let config_exists = config::Config::default_path()
+        .map(|p| p.exists())
+        .unwrap_or(false);
+
+    // Check if any model is already downloaded
+    let models_dir = config::Config::models_dir();
+    let has_model = models_dir.exists()
+        && std::fs::read_dir(&models_dir)
+            .map(|entries| {
+                entries.filter_map(|e| e.ok()).any(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    // Whisper models (ggml-*.bin) or Parakeet/ONNX model dirs
+                    (name.starts_with("ggml-") && name.ends_with(".bin"))
+                        || (e.path().is_dir() && e.path().join("encoder-model.onnx").exists())
+                })
+            })
+            .unwrap_or(false);
+
+    if config_exists && has_model {
+        return; // Not first launch
+    }
+
+    // Create default config if missing
+    if !config_exists {
+        if let Some(config_path) = config::Config::default_path() {
+            if let Some(parent) = config_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let content = config::default_config_content();
+            if std::fs::write(&config_path, &content).is_ok() {
+                tracing::info!("Created default config: {:?}", config_path);
+            }
+        }
+    }
+
+    // Download default model if none present
+    if !has_model {
+        // Detect system language to choose the right model
+        let is_english = tokio::process::Command::new("defaults")
+            .args(["read", "NSGlobalDomain", "AppleLanguages"])
+            .output()
+            .await
+            .map(|o| {
+                let s = String::from_utf8_lossy(&o.stdout);
+                s.lines()
+                    .find(|l| l.trim().starts_with('"'))
+                    .map(|l| l.trim().trim_matches(|c| c == '"' || c == ',').starts_with("en"))
+                    .unwrap_or(true)
+            })
+            .unwrap_or(true);
+
+        // Show notification that model is downloading
+        let _ = std::process::Command::new("osascript")
+            .args([
+                "-e",
+                "display notification \"Downloading speech model (this may take a minute)...\" with title \"Voxtype\"",
+            ])
+            .status();
+
+        #[cfg(feature = "parakeet")]
+        let download_result = if is_english {
+            tracing::info!("First launch: downloading Parakeet model");
+            setup::model::download_parakeet_model("parakeet-tdt-0.6b-v3-int8")
+                .and_then(|_| setup::model::set_parakeet_config("parakeet-tdt-0.6b-v3-int8"))
+        } else {
+            tracing::info!("First launch: downloading Whisper base model");
+            setup::model::download_model("base")
+                .and_then(|_| setup::model::set_model_config("base"))
+        };
+
+        #[cfg(not(feature = "parakeet"))]
+        let download_result = {
+            let model = if is_english { "base.en" } else { "base" };
+            tracing::info!("First launch: downloading Whisper {} model", model);
+            setup::model::download_model(model)
+                .and_then(|_| setup::model::set_model_config(model))
+        };
+
+        match download_result {
+            Ok(_) => {
+                let _ = std::process::Command::new("osascript")
+                    .args([
+                        "-e",
+                        "display notification \"Ready! Press fn to start recording.\" with title \"Voxtype\"",
+                    ])
+                    .status();
+            }
+            Err(e) => {
+                tracing::error!("Failed to download model: {}", e);
+                let msg = format!(
+                    "display notification \"Model download failed: {}. Run 'voxtype setup model' to try again.\" with title \"Voxtype\"",
+                    e.to_string().replace('"', "'")
+                );
+                let _ = std::process::Command::new("osascript")
+                    .args(["-e", &msg])
+                    .status();
+            }
+        }
+    }
+}
+
+/// Check for updates by comparing version with GitHub releases
+async fn check_for_updates() -> anyhow::Result<()> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("Voxtype Update Check\n");
+    println!("====================\n");
+    println!("Current version: {}", current);
+    println!("Checking for updates...\n");
+
+    // Fetch latest release from GitHub API (blocking call wrapped in spawn_blocking)
+    let result = tokio::task::spawn_blocking(|| {
+        ureq::get("https://api.github.com/repos/peteonrails/voxtype/releases/latest")
+            .set("User-Agent", "voxtype-update-checker")
+            .call()
+    })
+    .await?;
+
+    match result {
+        Ok(resp) => {
+            let release: serde_json::Value = resp.into_json()?;
+            if let Some(tag) = release["tag_name"].as_str() {
+                let latest = tag.trim_start_matches('v');
+
+                // Compare versions using semver
+                let current_ver = semver::Version::parse(current)
+                    .unwrap_or_else(|_| semver::Version::new(0, 0, 0));
+                let latest_ver = semver::Version::parse(latest)
+                    .unwrap_or_else(|_| semver::Version::new(0, 0, 0));
+
+                if latest_ver > current_ver {
+                    println!(
+                        "\x1b[33m⚠ Update available: {} → {}\x1b[0m\n",
+                        current, latest
+                    );
+                    println!(
+                        "Download: https://github.com/peteonrails/voxtype/releases/tag/{}",
+                        tag
+                    );
+                    println!("Website:  https://voxtype.io/download");
+
+                    // Show release notes excerpt if available
+                    if let Some(body) = release["body"].as_str() {
+                        let summary: String = body.lines().take(5).collect::<Vec<_>>().join("\n");
+                        if !summary.is_empty() {
+                            println!("\nRelease notes:");
+                            println!("{}", summary);
+                            if body.lines().count() > 5 {
+                                println!("...");
+                            }
+                        }
+                    }
+                } else {
+                    println!(
+                        "\x1b[32m✓ You're on the latest version ({}).\x1b[0m",
+                        current
+                    );
+                }
+            } else {
+                println!("Could not parse latest version from GitHub.");
+            }
+        }
+        Err(ureq::Error::Status(code, _)) => {
+            eprintln!("GitHub API returned status: {}", code);
+            eprintln!("Try again later or check manually: https://github.com/peteonrails/voxtype/releases");
+        }
+        Err(e) => {
+            eprintln!("Failed to check for updates: {}", e);
+            eprintln!("Check manually: https://github.com/peteonrails/voxtype/releases");
+        }
     }
 
     Ok(())
@@ -557,9 +872,6 @@ async fn main() -> anyhow::Result<()> {
 
 /// Check if the daemon is running, exit with error if not
 fn check_daemon_running() -> anyhow::Result<()> {
-    use nix::sys::signal::kill;
-    use nix::unistd::Pid;
-
     let pid_file = config::Config::runtime_dir().join("pid");
 
     if !pid_file.exists() {
@@ -576,8 +888,8 @@ fn check_daemon_running() -> anyhow::Result<()> {
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid PID in file: {}", e))?;
 
-    // Check if the process is actually running
-    if kill(Pid::from_raw(pid), None).is_err() {
+    // Check if the process is actually running (signal 0 = check existence)
+    if unsafe { libc::kill(pid, 0) } != 0 {
         // Process doesn't exist, clean up stale PID file
         let _ = std::fs::remove_file(&pid_file);
         eprintln!("Error: Voxtype daemon is not running (stale PID file removed).");
@@ -594,12 +906,10 @@ fn send_record_command(
     action: RecordAction,
     top_level_model: Option<&str>,
 ) -> anyhow::Result<()> {
-    use nix::sys::signal::{kill, Signal};
-    use nix::unistd::Pid;
     use voxtype::OutputModeOverride;
 
-    // Read PID from the pid file
-    let pid_file = config::Config::runtime_dir().join("pid");
+    // Read PID from the lock file (daemon writes PID to voxtype.lock)
+    let pid_file = config::Config::runtime_dir().join("voxtype.lock");
 
     if !pid_file.exists() {
         eprintln!("Error: Voxtype daemon is not running.");
@@ -615,8 +925,8 @@ fn send_record_command(
         .parse()
         .map_err(|e| anyhow::anyhow!("Invalid PID in file: {}", e))?;
 
-    // Check if the process is actually running
-    if kill(Pid::from_raw(pid), None).is_err() {
+    // Check if the process is actually running (signal 0 = check existence)
+    if unsafe { libc::kill(pid, 0) } != 0 {
         // Process doesn't exist, clean up stale PID file
         let _ = std::fs::remove_file(&pid_file);
         eprintln!("Error: Voxtype daemon is not running (stale PID file removed).");
@@ -714,9 +1024,9 @@ fn send_record_command(
     }
 
     // For toggle, we need to read current state to decide which signal to send
-    let signal = match &action {
-        RecordAction::Start { .. } => Signal::SIGUSR1,
-        RecordAction::Stop { .. } => Signal::SIGUSR2,
+    let signal: libc::c_int = match &action {
+        RecordAction::Start { .. } => libc::SIGUSR1,
+        RecordAction::Stop { .. } => libc::SIGUSR2,
         RecordAction::Toggle { .. } => {
             // Read current state to determine action
             let state_file = match config.resolve_state_file() {
@@ -738,16 +1048,21 @@ fn send_record_command(
                 std::fs::read_to_string(&state_file).unwrap_or_else(|_| "idle".to_string());
 
             if current_state.trim() == "recording" {
-                Signal::SIGUSR2 // Stop
+                libc::SIGUSR2 // Stop
             } else {
-                Signal::SIGUSR1 // Start
+                libc::SIGUSR1 // Start
             }
         }
         RecordAction::Cancel => unreachable!(), // Handled above
     };
 
-    kill(Pid::from_raw(pid), signal)
-        .map_err(|e| anyhow::anyhow!("Failed to send signal to daemon: {}", e))?;
+    let result = unsafe { libc::kill(pid, signal) };
+    if result != 0 {
+        return Err(anyhow::anyhow!(
+            "Failed to send signal to daemon: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
 
     Ok(())
 }
@@ -871,8 +1186,18 @@ struct ExtendedStatusInfo {
 
 impl ExtendedStatusInfo {
     fn from_config(config: &config::Config) -> Self {
-        // Try Whisper backend detection first, then fall back to ONNX backend detection
-        let backend = if let Some(b) = setup::gpu::detect_current_backend() {
+        // Resolve the actual backend through the inventory machinery — this is
+        // wrapper-script aware (see setup::binary::active_variant) so it
+        // reports correctly whether /usr/bin/voxtype is a plain symlink or the
+        // exec-wrapper used by GPU/ONNX variants. The legacy
+        // setup::gpu::detect_current_backend() path was Whisper-focused: it
+        // would treat any wrapper script as Backend::Native, which is why
+        // waybar previously showed "CPU (native)" while MIGraphX or CUDA was
+        // actually doing the work.
+        let inv = setup::binary::inventory();
+        let backend = if let Some(v) = inv.active_variant {
+            backend_display_for_variant(v).to_string()
+        } else if let Some(b) = setup::gpu::detect_current_backend() {
             match b {
                 setup::gpu::Backend::Cpu => "CPU (legacy)",
                 setup::gpu::Backend::Native => "CPU (native)",
@@ -895,6 +1220,28 @@ impl ExtendedStatusInfo {
     }
 }
 
+/// User-facing backend label for an active variant. Combines engine family
+/// (Whisper vs ONNX) with the EP/acceleration so both pieces of info land in
+/// waybar tooltips and `voxtype info` output. Whisper variants get a "CPU"/"GPU"
+/// prefix that matches the legacy display strings; ONNX variants spell out the
+/// EP name explicitly so users can tell a CUDA-12 install apart from CUDA-13.
+fn backend_display_for_variant(v: setup::binary::Variant) -> &'static str {
+    use setup::binary::Variant;
+    match v {
+        Variant::WhisperAvx2 => "CPU (AVX2)",
+        Variant::WhisperAvx512 => "CPU (AVX-512)",
+        Variant::WhisperVulkan => "GPU (Vulkan)",
+        Variant::WhisperNative => "CPU (native)",
+        Variant::OnnxAvx2 => "ONNX CPU (AVX2)",
+        Variant::OnnxAvx512 => "ONNX CPU (AVX-512)",
+        Variant::OnnxCuda12 => "ONNX GPU (CUDA 12)",
+        Variant::OnnxCuda13 => "ONNX GPU (CUDA 13)",
+        Variant::OnnxCuda => "ONNX GPU (CUDA)",
+        Variant::OnnxMigraphx => "ONNX GPU (MIGraphX)",
+        Variant::OnnxNative => "ONNX CPU (native)",
+    }
+}
+
 /// Check if the daemon is actually running by verifying the PID file
 fn is_daemon_running() -> bool {
     let pid_path = config::Config::runtime_dir().join("pid");
@@ -905,13 +1252,14 @@ fn is_daemon_running() -> bool {
         Err(_) => return false, // No PID file = not running
     };
 
-    let pid: u32 = match pid_str.trim().parse() {
+    let pid: i32 = match pid_str.trim().parse() {
         Ok(p) => p,
         Err(_) => return false, // Invalid PID = not running
     };
 
-    // Check if process exists by testing /proc/{pid}
-    std::path::Path::new(&format!("/proc/{}", pid)).exists()
+    // Check if process exists using kill(pid, 0) - works on both Linux and macOS
+    // Signal 0 doesn't send a signal, just checks if process exists and we have permission
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 /// Run the status command - show current daemon state
@@ -1092,6 +1440,100 @@ fn format_state_json(
                 text, alt, class, base_tooltip
             )
         }
+    }
+}
+
+/// Dispatch `voxtype info <subcommand>`.
+fn run_info_command(action: InfoAction) -> anyhow::Result<()> {
+    match action {
+        InfoAction::Variants { json } => {
+            let inv = setup::binary::inventory();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&inv)?);
+            } else {
+                print_variants_text(&inv);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_variants_text(inv: &setup::binary::Inventory) {
+    use setup::binary::InstallKind;
+
+    println!("Voxtype install");
+    println!("  Binary:        {}", inv.binary_path.display());
+    println!(
+        "  Install kind:  {}",
+        match inv.install_kind {
+            InstallKind::Package => "package",
+            InstallKind::Source => "source",
+        }
+    );
+    if let Some(dir) = &inv.package_lib_dir {
+        println!("  Lib dir:       {}", dir.display());
+    }
+    if !inv.compiled_features.is_empty() {
+        println!("  Features:      {}", inv.compiled_features.join(", "));
+    }
+
+    println!();
+    println!("Hardware");
+    println!(
+        "  CPU:           AVX2={}, AVX-512={}",
+        inv.cpu.avx2, inv.cpu.avx512
+    );
+    println!(
+        "  GPU:           NVIDIA={}, AMD={}",
+        inv.gpus.nvidia, inv.gpus.amd
+    );
+
+    println!();
+    println!("Recommended for this hardware");
+    println!(
+        "  Whisper:       ★ {}  — {}",
+        inv.recommendation.whisper.display(),
+        inv.recommendation.whisper_reason
+    );
+    println!(
+        "  ONNX:          ★ {}  — {}",
+        inv.recommendation.onnx.display(),
+        inv.recommendation.onnx_reason
+    );
+
+    println!();
+    if matches!(inv.install_kind, InstallKind::Source) {
+        println!("Source build: variant switching not applicable.");
+        println!("To enable a different engine, rebuild with the appropriate Cargo features.");
+        return;
+    }
+
+    println!("Variants");
+    if let Some(active) = inv.active_variant {
+        println!(
+            "  Active:        {} ({})",
+            active.display(),
+            active.binary_name()
+        );
+    } else {
+        println!("  Active:        unknown (symlink missing or unrecognized)");
+    }
+
+    println!();
+    println!("  Available:");
+    for status in &inv.variants {
+        let mark = if status.active {
+            "● active"
+        } else if !status.installed {
+            "  not installed"
+        } else if !status.runs_on_this_cpu {
+            "  installed (won't run on this CPU)"
+        } else if !status.gpu_available {
+            "  installed (no compatible GPU detected)"
+        } else {
+            "  installed"
+        };
+        println!("    {:<22} {}", status.variant.display(), mark);
     }
 }
 
@@ -1292,6 +1734,7 @@ async fn show_config(config: &config::Config) -> anyhow::Result<()> {
         "  on_transcription = {}",
         config.output.notification.on_transcription
     );
+    println!("  urgency = {:?}", config.output.notification.urgency);
 
     println!("\n[status]");
     println!("  icon_theme = {:?}", config.status.icon_theme);
@@ -1314,10 +1757,14 @@ async fn show_config(config: &config::Config) -> anyhow::Result<()> {
     setup::print_output_chain_status(&output_status);
 
     println!("\n---");
-    println!(
-        "Config file: {:?}",
-        config::Config::default_path().unwrap_or_else(|| PathBuf::from("(not found)"))
-    );
+    match config::Config::resolve_existing_path() {
+        Some(path) => println!("Config file: {:?} (loaded)", path),
+        None => println!(
+            "Config file: {:?} (not found, using defaults; system fallback {:?} also missing)",
+            config::Config::default_path().unwrap_or_else(|| PathBuf::from("(unknown)")),
+            config::Config::system_path()
+        ),
+    }
     println!("Models dir: {:?}", config::Config::models_dir());
 
     Ok(())

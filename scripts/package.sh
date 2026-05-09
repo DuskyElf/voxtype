@@ -395,13 +395,45 @@ if [[ "$TARGET_ARCH" == "x86_64" ]]; then
         cp "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-avx512" "$STAGING/usr/lib/voxtype/voxtype-onnx-avx512"
         chmod 755 "$STAGING/usr/lib/voxtype/voxtype-onnx-avx512"
     fi
-    if [[ -f "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-cuda" ]]; then
-        cp "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-cuda" "$STAGING/usr/lib/voxtype/voxtype-onnx-cuda"
-        chmod 755 "$STAGING/usr/lib/voxtype/voxtype-onnx-cuda"
-    fi
-    if [[ -f "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-rocm" ]]; then
-        cp "${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-rocm" "$STAGING/usr/lib/voxtype/voxtype-onnx-rocm"
-        chmod 755 "$STAGING/usr/lib/voxtype/voxtype-onnx-rocm"
+    # GPU-accelerated ONNX binaries each live in their own subdirectory
+    # alongside the companion shared libs they dlopen at runtime.
+    # ort 2.0.0-rc.12's CUDA/MIGraphX EPs dlopen libonnxruntime_providers_*.so
+    # and libonnxruntime_providers_shared.so based on the binary's own
+    # /proc/self/exe location; if they aren't co-located, EP registration
+    # fails and ort silently falls back to CPU.
+    #
+    # User-facing names at /usr/lib/voxtype/voxtype-onnx-* are symlinks into
+    # these subdirs. /proc/self/exe resolves the real path, so the .so files
+    # are found correctly even when invoked through a symlink.
+    install_onnx_gpu_variant() {
+        local variant="$1"      # cuda-12, cuda-13, migraphx
+        local ep_lib="$2"       # cuda or migraphx
+        local src="${RELEASE_DIR}/voxtype-${VERSION}-linux-x86_64-onnx-${variant}"
+        if [[ ! -f "$src" ]]; then
+            return 0
+        fi
+        local subdir="$STAGING/usr/lib/voxtype/${variant}"
+        mkdir -p "$subdir"
+        cp "$src" "$subdir/voxtype-onnx-${variant}"
+        chmod 755 "$subdir/voxtype-onnx-${variant}"
+        cp "${src}.libonnxruntime_providers_${ep_lib}.so" \
+            "$subdir/libonnxruntime_providers_${ep_lib}.so"
+        cp "${src}.libonnxruntime_providers_shared.so" \
+            "$subdir/libonnxruntime_providers_shared.so"
+        # Convenience symlink at the top level so existing tooling (the
+        # voxtype-wrapper.sh, voxtype setup gpu, ParakeetBackend detection)
+        # finds the binary by its short name.
+        ln -sf "${variant}/voxtype-onnx-${variant}" \
+            "$STAGING/usr/lib/voxtype/voxtype-onnx-${variant}"
+    }
+    install_onnx_gpu_variant cuda-12 cuda
+    install_onnx_gpu_variant cuda-13 cuda
+    install_onnx_gpu_variant migraphx migraphx
+    # Legacy compat symlink for users with scripts referencing the old
+    # voxtype-onnx-rocm name. The AMD GPU EP changed from ROCm to MIGraphX
+    # in v0.7.0; ship one release with both names. Drop in v0.8.0.
+    if [[ -L "$STAGING/usr/lib/voxtype/voxtype-onnx-migraphx" ]]; then
+        ln -sf migraphx/voxtype-onnx-migraphx "$STAGING/usr/lib/voxtype/voxtype-onnx-rocm"
     fi
 
     # Install wrapper script as /usr/bin/voxtype

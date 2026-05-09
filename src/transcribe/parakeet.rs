@@ -12,7 +12,7 @@ use crate::config::{ParakeetConfig, ParakeetModelType};
 use crate::error::TranscribeError;
 #[cfg(any(
     feature = "parakeet-cuda",
-    feature = "parakeet-rocm",
+    feature = "parakeet-migraphx",
     feature = "parakeet-tensorrt"
 ))]
 use parakeet_rs::ExecutionProvider;
@@ -310,16 +310,16 @@ fn build_execution_config() -> Option<ExecutionConfig> {
         return None;
     }
 
-    #[cfg(feature = "parakeet-rocm")]
+    #[cfg(feature = "parakeet-migraphx")]
     {
-        tracing::info!("Configuring ROCm execution provider for AMD GPU acceleration");
-        return Some(ExecutionConfig::new().with_execution_provider(ExecutionProvider::ROCm));
+        tracing::info!("Configuring MIGraphX execution provider for AMD GPU acceleration");
+        return Some(ExecutionConfig::new().with_execution_provider(ExecutionProvider::MIGraphX));
     }
 
     #[cfg(not(any(
         feature = "parakeet-cuda",
         feature = "parakeet-tensorrt",
-        feature = "parakeet-rocm"
+        feature = "parakeet-migraphx"
     )))]
     {
         None
@@ -391,25 +391,32 @@ fn probe_cuda_runtime() -> bool {
     let minor = (version % 1000) / 10;
     tracing::info!("Detected CUDA runtime version: {}.{}", major, minor);
 
-    // The bundled ONNX Runtime (via ort crate) is built against CUDA 12.x.
-    // A major version mismatch causes a segfault in ONNX Runtime's CUDA EP
-    // initialization - there's no way to catch this from Rust.
-    const EXPECTED_CUDA_MAJOR: i32 = 12;
+    // ort 2.0.0-rc.12 picks the cu12 or cu13 prebuilt at compile time from
+    // ORT_CUDA_VERSION (see ort-sys/build/download/resolve.rs). build.rs
+    // mirrors that selection into VOXTYPE_BUILD_CUDA_MAJOR so this probe
+    // accepts only the runtime version the bundled EP can actually talk to.
+    // A mismatched major would crash ort's CUDA EP during initialization.
+    //
+    // Voxtype ships separate voxtype-onnx-cuda-12 and voxtype-onnx-cuda-13
+    // binaries. `voxtype setup gpu --enable` symlinks voxtype-onnx-cuda to
+    // whichever variant matches the host's CUDA runtime.
+    const EXPECTED_CUDA_MAJOR: i32 = match env!("VOXTYPE_BUILD_CUDA_MAJOR").as_bytes() {
+        b"13" => 13,
+        _ => 12,
+    };
 
     if major != EXPECTED_CUDA_MAJOR {
         tracing::error!(
-            "CUDA version mismatch: found CUDA {}.{}, but the bundled ONNX Runtime \
-             requires CUDA {}.x. Continuing would crash the process.\n  \
+            "CUDA version mismatch: found CUDA {major}.{minor}, but this binary's \
+             bundled ONNX Runtime requires CUDA {EXPECTED_CUDA_MAJOR}.x. \
+             Continuing would crash the process.\n  \
              Options:\n  \
-             1. Install CUDA {} (e.g., the cuda-12 package)\n  \
-             2. Use the pre-built release binary (voxtype-onnx-cuda) which bundles \
-             compatible libraries\n  \
-             3. Build from source with --features parakeet-load-dynamic to link against \
-             your system's ONNX Runtime instead",
+             1. Install the matching voxtype-onnx-cuda-{EXPECTED_CUDA_MAJOR} package\n  \
+             2. Switch to voxtype-onnx-cuda-{} for your CUDA version (`voxtype setup gpu --enable` \
+             auto-detects and points the symlink at the right one)\n  \
+             3. Build from source with --features parakeet-load-dynamic to link \
+             against your system's ONNX Runtime instead",
             major,
-            minor,
-            EXPECTED_CUDA_MAJOR,
-            EXPECTED_CUDA_MAJOR,
         );
         return false;
     }

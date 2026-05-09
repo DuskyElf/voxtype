@@ -2,6 +2,14 @@
 
 Complete reference for all configuration options in Voxtype.
 
+> **Tip**: For interactive editing, run `voxtype configure` — it edits the
+> same `config.toml` this document describes, preserves comments and unknown
+> fields, and validates each save before swapping the file in. The reference
+> below stays useful for scripted setups, advanced fields the TUI doesn't
+> surface yet, and understanding each section end-to-end. See the
+> [TUI section in the user manual](USER_MANUAL.md#voxtype-configure) for
+> keybindings.
+
 ## Configuration File Location
 
 Voxtype looks for configuration in the following locations (in order):
@@ -27,6 +35,11 @@ Selects which speech-to-text engine to use for transcription.
 - `whisper` - OpenAI Whisper via whisper.cpp (default, recommended)
 - `parakeet` - NVIDIA Parakeet via ONNX Runtime (requires ONNX binary)
 - `moonshine` - Moonshine encoder-decoder transformer via ONNX Runtime (experimental, requires special binary)
+- `sensevoice` - Alibaba SenseVoice CTC via ONNX Runtime (CJK + English)
+- `paraformer` - FunASR Paraformer CTC via ONNX Runtime (Chinese + English)
+- `dolphin` - Dictation-optimized CTC via ONNX Runtime (Chinese + English)
+- `omnilingual` - FunASR Omnilingual CTC via ONNX Runtime (50+ languages)
+- `cohere` - Cohere Transcribe encoder-decoder via ONNX Runtime (#1 Open ASR Leaderboard, 14 languages, ~3 GB model)
 
 **Example:**
 ```toml
@@ -39,11 +52,11 @@ voxtype --engine parakeet daemon
 ```
 
 **Notes:**
-- Parakeet requires an ONNX-enabled binary (`voxtype-*-onnx-*`)
-- When using Parakeet, you must also configure the `[parakeet]` section
-- When using Moonshine, you must also configure the `[moonshine]` section
+- All engines except Whisper require an ONNX-enabled binary (`voxtype-*-onnx-*`)
+- Each ONNX engine reads its own `[<engine>]` section (e.g. `[parakeet]`, `[cohere]`)
 - See [PARAKEET.md](PARAKEET.md) for detailed Parakeet setup instructions
 - See [MOONSHINE.md](MOONSHINE.md) for detailed Moonshine setup instructions
+- Cohere Transcribe is the largest model voxtype ships (~3 GB int8); use `voxtype setup model` to download it
 
 ---
 
@@ -406,7 +419,7 @@ Selects the transcription backend.
 
 > **Privacy Notice**: When using `remote` backend, audio is transmitted over the network. See [User Manual - Remote Whisper Servers](USER_MANUAL.md#remote-whisper-servers) for privacy considerations.
 
-**When to use `cli` backend:**
+**When to use `cli` backend (Linux only):**
 The `cli` backend is a workaround for systems where the whisper-rs FFI bindings crash due to C++ exceptions crossing the FFI boundary. This affects some systems with glibc 2.42+ (e.g., Ubuntu 25.10). If voxtype crashes during transcription, try the `cli` backend.
 
 Requires `whisper-cli` from [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
@@ -997,6 +1010,7 @@ remote_timeout_secs = 60  # 60 second timeout for long recordings
 **Type:** String
 **Default:** Auto-detected from PATH
 **Required:** No
+**Platform:** Linux only
 
 Path to the `whisper-cli` binary. Only used when `backend = "cli"`.
 
@@ -1186,6 +1200,137 @@ model = "base"
 quantized = true
 on_demand_loading = false  # Keep model loaded for fast response
 ```
+
+---
+
+## [cohere]
+
+Configuration for the Cohere Transcribe speech-to-text engine. This section is only used when `engine = "cohere"`.
+
+Cohere Transcribe is an encoder-decoder ASR model from Cohere Labs. It currently sits at #1 on the Open ASR Leaderboard. Whisper-style task tokens give it punctuation, capitalization, and inverse text normalization out of the box.
+
+### model
+
+**Type:** String
+**Default:** `"cohere-transcribe-int8"`
+**Required:** No
+
+The Cohere model to use. Can be a model name (looked up in `~/.local/share/voxtype/models/<name>/`) or an absolute path to a model directory.
+
+**Available models:**
+
+| Model | Quantization | Size | Notes |
+|-------|--------------|------|-------|
+| `cohere-transcribe-q4f16` | int4 weights, FP16 KV | ~1.5 GB | Recommended; smallest download, fastest CPU |
+| `cohere-transcribe-q4` | int4 weights, FP32 KV | ~2.0 GB | Same accuracy as q4f16, larger memory |
+| `cohere-transcribe-int8` | int8 | ~2.9 GB | Quality reference for quantized models |
+| `cohere-transcribe-fp16` | FP16 | ~3.9 GB | Highest accuracy, largest download |
+
+All variants are HuggingFace Optimum exports of Cohere Transcribe (16384 vocab, 14 languages). Download via `voxtype setup model` (interactive) — pick the Cohere section and confirm the size warning.
+
+**Performance (warm CPU, voxtype 0.7.0, dictation-length audio):**
+
+| Variant | Realtime factor | Notes |
+|---------|-----------------|-------|
+| q4f16 | 9-11× | Best CPU throughput |
+| q4 | 9-11× | Same speed as q4f16 |
+| int8 | 2-3× | Slowest CPU path |
+| fp16 | 7-8× | |
+
+**GPU acceleration (CUDA):** The `voxtype-onnx-cuda-12` and `voxtype-onnx-cuda-13` binaries register the CUDA execution provider on the encoder. The decoder is pinned to CPU because ORT's CUDA `GroupQueryAttention` kernel does not yet accept the `attention_bias` input that the HF Optimum decoder export uses. Encoder-on-GPU is where weight matmuls dominate, so this hybrid is most of the win.
+
+GPU speedup is hardware- and length-dependent. On a GTX 1660 Ti + i9-9900KF with q4f16:
+
+| Audio length | CPU only | Encoder GPU + Decoder CPU |
+|--------------|----------|---------------------------|
+| 4.75s | 5.0× realtime | 4.6× realtime |
+| 28.5s | 5.9× realtime | 8.2× realtime (~28% faster) |
+
+The fixed CUDA setup cost dominates short clips; longer utterances and faster GPUs (RTX 30/40 series) pull further ahead. Once ORT lands the missing GQA kernel, the decoder will move to the GPU automatically without a config change.
+
+**Example:**
+```toml
+[cohere]
+model = "cohere-transcribe-int8"
+```
+
+### language
+
+**Type:** String
+**Default:** `"en"`
+**Required:** No
+
+Two-letter ISO 639-1 language code. Cohere officially supports 14 languages.
+
+**Supported values:** `ar`, `de`, `en`, `es`, `fr`, `hi`, `it`, `ja`, `ko`, `nl`, `pt`, `ru`, `tr`, `zh`.
+
+**Example:**
+```toml
+[cohere]
+language = "fr"
+```
+
+The daemon resolves the language to its decoder prefix at startup. Unsupported codes are rejected with a clear error.
+
+### threads
+
+**Type:** Integer (optional)
+**Default:** unset (uses `min(num_cpus, 4)`)
+**Required:** No
+
+Number of CPU threads for ONNX Runtime intra-op parallelism. Leave unset on most machines.
+
+**Example:**
+```toml
+[cohere]
+threads = 8
+```
+
+### on_demand_loading
+
+**Type:** Boolean
+**Default:** `false`
+**Required:** No
+
+Same behavior as `[whisper].on_demand_loading`. When `true`, loads the model only when recording starts and unloads after transcription. Useful when working on a laptop where 3 GB of RAM dedicated to the daemon is too costly.
+
+**Example:**
+```toml
+[cohere]
+on_demand_loading = true
+```
+
+### Configuration Summary
+
+| Option | CLI Flag | Environment Variable | Default | Description |
+|--------|----------|---------------------|---------|-------------|
+| `model` | `--model` | `VOXTYPE_MODEL` | `"cohere-transcribe-q4f16"` | Cohere model name or path |
+| `language` | `--language` | `VOXTYPE_LANGUAGE` | `"en"` | One of the 14 supported language codes |
+| `threads` | - | - | auto | ONNX intra-op thread count |
+| `on_demand_loading` | - | - | `false` | Load model only when recording starts |
+
+### Complete Example
+
+```toml
+engine = "cohere"
+
+[cohere]
+model = "cohere-transcribe-q4f16"
+language = "en"
+on_demand_loading = false
+```
+
+### Building from Source
+
+Source builds need the `cohere` Cargo feature. Optional GPU acceleration via `cohere-cuda` or `cohere-tensorrt`:
+
+```bash
+cargo build --release --features cohere           # CPU
+cargo build --release --features cohere-cuda      # NVIDIA GPU
+cargo build --release --features cohere-tensorrt  # NVIDIA + TensorRT EP
+```
+
+The prebuilt `voxtype-*-onnx-*` release binaries already include `cohere`, so users installing via AUR/.deb/.rpm don't need to rebuild.
 
 ---
 
@@ -1478,6 +1623,24 @@ When `true`, shows a notification with the transcribed text after transcription 
 on_recording_start = true   # Notify when PTT activates
 on_recording_stop = true    # Notify when transcribing
 on_transcription = true     # Show transcribed text
+```
+
+### urgency
+
+**Type:** String (`"low"`, `"normal"`, or `"critical"`)
+**Default:** `"normal"`
+**Required:** No
+
+Sets the urgency level passed to `notify-send` for all voxtype notifications.
+
+On GNOME, notifications with `"low"` urgency are delivered to the notification drawer without showing as a popup banner. Use `"normal"` (the default) if you want notifications to pop up on screen. Use `"critical"` if you want notifications that persist until dismissed.
+
+Unknown values fall back to `"normal"`.
+
+**Example:**
+```toml
+[output.notification]
+urgency = "normal"  # "low" | "normal" | "critical"
 ```
 
 ### type_delay_ms
@@ -1990,6 +2153,60 @@ VOXTYPE_SMART_AUTO_SUBMIT=true voxtype
 ```
 
 **Note:** `smart_auto_submit` is conditional - it only fires when you say "submit". The existing `auto_submit` option always presses Enter after every transcription. Use `smart_auto_submit` when you want the choice per dictation, and `auto_submit` when you always want Enter pressed.
+
+### filter_filler_words
+
+**Type:** Boolean
+**Default:** `true`
+**Required:** No
+
+When `true` (the default), strips common filler words ("uh", "um", "er", ...) from each transcription before output. Matching is case-insensitive and respects word boundaries, so words like "umbrella" or "summer" are not affected. Surrounding commas, semicolons, and double spaces are cleaned up so the result reads naturally. Set to `false` to disable.
+
+**Example:**
+
+```toml
+[text]
+filter_filler_words = true
+```
+
+With this enabled:
+
+- "Well, um, I think" becomes "Well, I think"
+- "uh hello world" becomes "hello world"
+- "hello world, uh." becomes "hello world."
+
+**CLI flag:**
+
+```bash
+voxtype --filter-fillers       # force on (overrides config)
+voxtype --no-filter-fillers    # force off (overrides config)
+```
+
+**Environment variable:**
+
+```bash
+VOXTYPE_FILTER_FILLERS=true voxtype
+```
+
+The filter runs before `replacements` and the `[post_process]` LLM hook, so any custom replacements still apply on top of filtered text.
+
+### filler_words
+
+**Type:** Array of strings
+**Default:** `["uh", "um", "er", "ah", "eh", "hmm", "hm", "mm", "mhm"]`
+**Required:** No
+
+Words removed by the filler-word filter. The default list is conservative and includes only single-syllable disfluencies. Override it to add your own (for example "like" or "you know"), or to disable specific entries by replacing the list.
+
+**Example:**
+
+```toml
+[text]
+filter_filler_words = true
+filler_words = ["uh", "um", "er", "like", "you know"]
+```
+
+Multi-word entries like "you know" are matched as a single phrase. Adding aggressive entries (such as "like") may strip legitimate uses of the word; keep the list conservative or disable the filter for technical writing.
 
 ---
 
@@ -2518,6 +2735,8 @@ Any config file setting can be overridden via environment variable. These are ap
 | `VOXTYPE_PASTE_KEYS` | string | `output.paste_keys` |
 | `VOXTYPE_DOTOOL_XKB_LAYOUT` | string | `output.dotool_xkb_layout` |
 | `VOXTYPE_SPOKEN_PUNCTUATION` | bool | `text.spoken_punctuation` |
+| `VOXTYPE_SMART_AUTO_SUBMIT` | bool | `text.smart_auto_submit` |
+| `VOXTYPE_FILTER_FILLERS` | bool | `text.filter_filler_words` |
 
 Boolean values: `true`, `1` to enable; `false`, `0` to disable.
 

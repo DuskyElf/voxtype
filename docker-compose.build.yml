@@ -76,11 +76,14 @@ services:
     profiles:
       - avx512  # Only build if explicitly requested (requires AVX-512 capable host)
 
-  # ONNX CUDA build (NVIDIA GPU acceleration with CPU fallback)
-  onnx-cuda:
+  # ONNX CUDA 12 build (NVIDIA GPUs on CUDA 12.x runtime)
+  # ort 2.0.0-rc.12 picks the cu12 prebuilt at build time; shipping a separate
+  # cu13 binary covers the CUDA 13.x user base. At install time, voxtype-onnx-cuda
+  # is symlinked to whichever variant matches the host's CUDA runtime.
+  onnx-cuda-12:
     build:
       context: .
-      dockerfile: Dockerfile.onnx-cuda
+      dockerfile: Dockerfile.onnx-cuda-12
       args:
         VERSION: ${VERSION:-0.6.2}
     volumes:
@@ -88,11 +91,23 @@ services:
     environment:
       - VERSION=${VERSION:-0.6.2}
 
-  # ONNX ROCm build (AMD GPU acceleration, requires AMD GPU host)
-  onnx-rocm:
+  # ONNX CUDA 13 build (NVIDIA GPUs on CUDA 13.x runtime, requires driver 580+)
+  onnx-cuda-13:
     build:
       context: .
-      dockerfile: Dockerfile.onnx-rocm
+      dockerfile: Dockerfile.onnx-cuda-13
+      args:
+        VERSION: ${VERSION:-0.6.2}
+    volumes:
+      - ./releases/${VERSION:-0.6.2}:/output
+    environment:
+      - VERSION=${VERSION:-0.6.2}
+
+  # ONNX MIGraphX build (AMD GPU acceleration, requires AMD GPU host)
+  onnx-migraphx:
+    build:
+      context: .
+      dockerfile: Dockerfile.onnx-migraphx
       args:
         VERSION: ${VERSION:-0.6.2}
     volumes:

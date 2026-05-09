@@ -61,11 +61,13 @@
         <div class="hero-content">
             <h1>Voice to Text for <span class="highlight">Linux</span> and <span class="highlight">macOS</span></h1>
             <p class="hero-subtitle">
-                Push-to-talk voice-to-text that works on any desktop.
-                Hold a key, speak, release. Your words appear at the cursor.
+                9-11&times; realtime on your CPU. Local by default.
+                Voxtype runs Cohere Transcribe (#1 on the Open ASR Leaderboard) faster than realtime
+                on a plain Zen 4 CPU. Parakeet, Whisper, and five more engines if you want them.
+                No cloud, no subscription, no telemetry.
             </p>
             <div class="hero-badges">
-                <span class="badge">Fully Offline</span>
+                <span class="badge">Local by Default</span>
                 <span class="badge">Open Source</span>
                 <span class="badge">Wayland Optimized</span>
             </div>
@@ -82,17 +84,17 @@
                 </div>
                 <div class="terminal-body">
                     <pre><code><span class="prompt">$</span> voxtype
-<span class="info">[INFO]</span> Voxtype v0.6.0 starting...
-<span class="info">[INFO]</span> Using model: base.en
+<span class="info">[INFO]</span> Voxtype v0.7.0 starting...
+<span class="info">[INFO]</span> Engine: cohere (cohere-transcribe-q4f16)
 <span class="info">[INFO]</span> Hotkey: SCROLLLOCK
 <span class="info">[INFO]</span> Ready! Hold SCROLLLOCK to record.
 
-<span class="comment"># User holds ScrollLock and speaks...</span>
+<span class="comment"># User holds ScrollLock and speaks for 4.75s...</span>
 <span class="info">[INFO]</span> Recording started...
-<span class="info">[INFO]</span> Recording stopped (2.1s)
-<span class="info">[INFO]</span> Transcribing...
-<span class="success">[INFO]</span> Transcribed: "<span class="output">Hello world, this is a test.</span>"
-<span class="success">[INFO]</span> Typed 30 characters</code></pre>
+<span class="info">[INFO]</span> Recording stopped (4.75s)
+<span class="info">[INFO]</span> Cohere transcription completed in 0.45s (10.6&times; realtime)
+<span class="success">[INFO]</span> Transcribed: "<span class="output">This is a longer test of voice activity detection with multiple words and phrases.</span>"
+<span class="success">[INFO]</span> Typed 86 characters</code></pre>
                 </div>
             </div>
         </div>
@@ -101,41 +103,10 @@
     <!-- Features Section -->
     <section id="features" class="features">
         <div class="container">
-            <h2>Why Voxtype?</h2>
-            <p class="section-subtitle">Built specifically for the modern Linux desktop</p>
+            <h2>What makes Voxtype different</h2>
+            <p class="section-subtitle">Built specifically for the modern Linux desktop. Fast on every machine.</p>
 
             <div class="feature-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-                            <line x1="8" y1="21" x2="16" y2="21"/>
-                            <line x1="12" y1="17" x2="12" y2="21"/>
-                        </svg>
-                    </div>
-                    <h3>Works on Any Linux Desktop</h3>
-                    <p>
-                        Works on GNOME, KDE, Sway, Hyprland, River—Wayland or X11.
-                        Use built-in hotkeys or native compositor keybindings.
-                    </p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="3" y="11" width="18" height="10" rx="2"/>
-                            <rect x="7" y="7" width="3" height="4"/>
-                            <rect x="14" y="7" width="3" height="4"/>
-                            <line x1="12" y1="3" x2="12" y2="7"/>
-                        </svg>
-                    </div>
-                    <h3>Native Hyprland, Sway & River Support</h3>
-                    <p>
-                        Use your compositor's keybindings instead of evdev—no <code>input</code> group required.
-                        Bind any key combo like <code>Super+V</code> for push-to-talk.
-                    </p>
-                </div>
-
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -143,10 +114,61 @@
                             <polyline points="9 12 12 15 16 10"/>
                         </svg>
                     </div>
-                    <h3>Fully Offline & Private</h3>
+                    <h3>Local by default</h3>
                     <p>
-                        All speech recognition happens locally using whisper.cpp.
-                        Your voice never leaves your machine. No cloud, no subscriptions, no tracking.
+                        Your audio stays on your machine. No cloud, no subscription, no telemetry.
+                        Optional remote Whisper servers when you want them &mdash; never required.
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18V5l12-2v13"/>
+                            <circle cx="6" cy="18" r="3"/>
+                            <circle cx="18" cy="16" r="3"/>
+                        </svg>
+                    </div>
+                    <h3>Pauses your music</h3>
+                    <p>
+                        Auto-pauses Spotify, Plasma media players, and anything that speaks MPRIS
+                        the moment you start dictating. Resumes on release. No more accidentally
+                        dictating over a podcast.
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                        </svg>
+                    </div>
+                    <h3>Meeting mode</h3>
+                    <p>
+                        Continuous transcription with chunked processing, speaker attribution,
+                        and export to Markdown, JSON, SRT, or VTT. Optional LLM post-processing
+                        pipes transcripts through Ollama for cleanup or summarization.
+                    </p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="6" y2="12"/>
+                            <line x1="6" y1="9" x2="6" y2="15"/>
+                            <line x1="9" y1="6" x2="9" y2="18"/>
+                            <line x1="12" y1="3" x2="12" y2="21"/>
+                            <line x1="15" y1="6" x2="15" y2="18"/>
+                            <line x1="18" y1="9" x2="18" y2="15"/>
+                            <line x1="21" y1="12" x2="18" y2="12"/>
+                        </svg>
+                    </div>
+                    <h3>Floating waveform OSD</h3>
+                    <p>
+                        Matches your <code>swayosd</code> band by default &mdash; same vertical
+                        position as volume and brightness panels &mdash; so the level meter sits
+                        where you already look for system feedback.
+                        <em>New in 0.7.0.</em>
                     </p>
                 </div>
 
@@ -159,10 +181,11 @@
                             <line x1="8" y1="23" x2="16" y2="23"/>
                         </svg>
                     </div>
-                    <h3>Push-to-Talk</h3>
+                    <h3>Seven transcription engines</h3>
                     <p>
-                        Natural workflow: hold a key to record, release to transcribe.
-                        No "wake words", no accidental activations, just controlled dictation.
+                        Whisper &middot; Parakeet &middot; Moonshine &middot; SenseVoice &middot;
+                        Paraformer &middot; Dolphin &middot; Omnilingual. Switch with one config
+                        line. CJK and 1600+ languages covered by the multilingual engines.
                     </p>
                 </div>
 
@@ -173,24 +196,14 @@
                             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                         </svg>
                     </div>
-                    <h3>Highly Configurable</h3>
+                    <h3>Interactive TUI configure</h3>
                     <p>
-                        Choose your hotkey, Whisper model size, output mode (type or clipboard),
-                        and more. Works the way you want it to.
-                    </p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="16 18 22 12 16 6"/>
-                            <polyline points="8 6 2 12 8 18"/>
-                        </svg>
-                    </div>
-                    <h3>Smart Fallbacks</h3>
-                    <p>
-                        Types directly at cursor via wtype, with full CJK/Unicode support.
-                        Falls back to ydotool or clipboard. Always works, one way or another.
+                        <code>voxtype configure</code> edits every option in
+                        <code>~/.config/voxtype/config.toml</code> for you &mdash; no
+                        hand-editing TOML. Auto-downloads missing models, swaps GPU binaries via
+                        <code>pkexec</code>, restarts the daemon when needed. Surfaces in
+                        Walker, fuzzel, and rofi as &ldquo;Voxtype Configuration&rdquo;.
+                        <em>New in 0.7.0.</em>
                     </p>
                 </div>
 
@@ -200,10 +213,12 @@
                             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
                         </svg>
                     </div>
-                    <h3>Fast & Lightweight</h3>
+                    <h3>Cohere Transcribe at 9-11&times; realtime &mdash; on your CPU</h3>
                     <p>
-                        Written in Rust for performance. Single binary, minimal dependencies.
-                        No Python, no virtual environments—just works.
+                        Quantized to 1.5 GB (q4f16) so it loads fast and runs faster than realtime
+                        on a plain Zen 4 CPU. Punctuation, capitalization, and inverse text
+                        normalization out of the box. Sits at #1 on the Open ASR Leaderboard.
+                        <em>New in 0.7.0.</em>
                     </p>
                 </div>
 
@@ -218,56 +233,60 @@
                             <line x1="12" y1="16" x2="12" y2="20"/>
                         </svg>
                     </div>
-                    <h3>GPU Acceleration</h3>
+                    <h3>Parakeet on AMD and NVIDIA GPUs</h3>
                     <p>
-                        Optional Vulkan, CUDA, Metal, and ROCm support for blazing-fast inference.
-                        Sub-second transcription with large-v3-turbo on modern GPUs.
+                        MIGraphX 7.2 for Radeon RX 7000 and 9000-series cards. Separate
+                        CUDA 12 and CUDA 13 binaries so every NVIDIA driver generation works.
+                        Vulkan for Whisper across vendors.
+                        <em>MIGraphX new in 0.7.0.</em>
                     </p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="2" y="3" width="20" height="4" rx="1"/>
-                            <rect x="4" y="9" width="4" height="4" rx="1"/>
-                            <rect x="10" y="9" width="4" height="4" rx="1"/>
-                            <rect x="16" y="9" width="4" height="4" rx="1"/>
-                            <rect x="4" y="15" width="4" height="4" rx="1"/>
-                            <rect x="10" y="15" width="4" height="4" rx="1"/>
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                            <line x1="8" y1="21" x2="16" y2="21"/>
+                            <line x1="12" y1="17" x2="12" y2="21"/>
                         </svg>
                     </div>
-                    <h3>Waybar Integration</h3>
+                    <h3>Hyprland, Niri, Sway, River, GNOME, KDE</h3>
                     <p>
-                        Optional status indicator shows recording state in your bar.
-                        See when Voxtype is idle, recording, or transcribing at a glance.
-                        10 built-in icon themes (Nerd Font, Material Design, emoji, and more) or define your own.
+                        Compositor keybindings everywhere, evdev fallback for X11, Wayland-first
+                        typing via wtype with full CJK support. Falls back through dotool
+                        &rarr; ydotool &rarr; clipboard if any layer is unavailable.
                     </p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
                         </svg>
                     </div>
-                    <h3>Desktop Notifications</h3>
+                    <h3>Dynamic per-engine model loading</h3>
                     <p>
-                        Configurable events surface through notify-send, so you always know
-                        when recording starts, stops, and what was transcribed.
+                        Configure all seven engines, pay memory only for the one you're actually
+                        using. Models load on first use and unload when idle so you can switch
+                        engines mid-day without restarting the daemon.
                     </p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                            <path d="M4 7V4h16v3"/>
+                            <path d="M9 20h6"/>
+                            <path d="M12 4v16"/>
                         </svg>
                     </div>
-                    <h3>LLM Post-Processing</h3>
+                    <h3>Text processing built in</h3>
                     <p>
-                        Pipe transcriptions through local LLMs for translation, domain-specific
-                        vocabulary, or custom workflows. Falls back gracefully on errors.
+                        Spoken punctuation (<code>"comma"</code> &rarr; <code>,</code>),
+                        per-user replacement tables for common mistranscriptions, and an optional
+                        post-processing pipe through any LLM or shell script. Fix domain terms,
+                        drop filler words, polish grammar &mdash; all without leaving voxtype.
                     </p>
                 </div>
 
@@ -280,13 +299,58 @@
                             <line x1="6" y1="18" x2="6.01" y2="18"/>
                         </svg>
                     </div>
-                    <h3>Remote Whisper Servers</h3>
+                    <h3>One package on every distro</h3>
                     <p>
-                        Offload transcription to a self-hosted GPU server running whisper.cpp.
-                        Use your laptop while leveraging powerful remote hardware.
-                        <em>Can also connect to cloud APIs for those who choose.</em>
+                        AUR (<code>voxtype</code>, <code>voxtype-bin</code>),
+                        <code>.deb</code>, <code>.rpm</code>, Homebrew on macOS. Signed release
+                        binaries from a reproducible Docker pipeline so what you install is what
+                        we built. MIT licensed.
                     </p>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Latest News Section -->
+    <section id="news-preview" class="news-preview">
+        <div class="container">
+            <h2>Latest news</h2>
+            <p class="section-subtitle">Recent releases and what they bring</p>
+
+            <div class="news-preview-grid">
+                <a href="news/#v070rc2" class="news-preview-card">
+                    <div class="news-preview-meta">
+                        <time datetime="2026-05-06">May 6, 2026</time>
+                        <span class="news-preview-tag">Pre-release</span>
+                    </div>
+                    <h3>v0.7.0-rc2: Cohere Transcribe, macOS port, MIGraphX, configure TUI</h3>
+                    <p>Cohere at 9-11&times; realtime on CPU, native macOS via Apple Silicon, MIGraphX 7.2 for AMD GPUs, two CUDA binaries for every NVIDIA driver generation, and a new <code>voxtype configure</code> TUI.</p>
+                    <span class="news-preview-link">Read more &rarr;</span>
+                </a>
+
+                <a href="news/#v066" class="news-preview-card">
+                    <div class="news-preview-meta">
+                        <time datetime="2026-04-18">April 18, 2026</time>
+                        <span class="news-preview-tag">Release</span>
+                    </div>
+                    <h3>v0.6.6: Media Pause, Audio Feedback, KDE Support</h3>
+                    <p>Auto-pause your music while dictating. Audio cues when transcription finishes. KDE Plasma compositor keybindings documented. Seven bug fixes across output drivers, text processing, and the remote backend.</p>
+                    <span class="news-preview-link">Read more &rarr;</span>
+                </a>
+
+                <a href="news/#v065" class="news-preview-card">
+                    <div class="news-preview-meta">
+                        <time datetime="2026-03-31">March 31, 2026</time>
+                        <span class="news-preview-tag">Release</span>
+                    </div>
+                    <h3>v0.6.5: Eager Processing, Multi-GPU Device Selection</h3>
+                    <p>Real-time transcription during recording on slower CPUs. Direct control over which GPU runs inference on multi-GPU systems. New English-only Parakeet TDT models.</p>
+                    <span class="news-preview-link">Read more &rarr;</span>
+                </a>
+            </div>
+
+            <div class="news-preview-cta">
+                <a href="news/" class="btn btn-secondary">All releases &rarr;</a>
             </div>
         </div>
     </section>
@@ -1094,7 +1158,7 @@ systemctl --user status voxtype</code></pre>
 
             <div class="footer-bottom">
                 <p>&copy; 2024, 2025, 2026 Voxtype. Open source under the MIT License.</p>
-                <p>Made by <a href="https://fasteragile.com">Faster Agile</a> and <a href="https://peterjackson.dev">Peter Jackson</a> with contributions from <a href="https://github.com/jvantillo">jvantillo</a>, <a href="https://github.com/materemias">materemias</a>, <a href="https://github.com/danheuck">danheuck</a>, <a href="https://github.com/digunix">digunix</a>, <a href="https://github.com/reisset">reisset</a>, <a href="https://github.com/goodroot">Goodroot</a>, <a href="https://github.com/robzolkos">robzolkos</a>, <a href="https://github.com/konnsim">konnsim</a>, <a href="https://github.com/IgorWarzocha">IgorWarzocha</a>, <a href="https://github.com/mzubair481">Zubair</a>, <a href="https://github.com/radiorambo">Umesh</a></p>
+                <p>Made by <a href="https://fasteragile.com">Faster Agile</a> and <a href="https://peterjackson.dev">Peter Jackson</a> with contributions from <a href="https://github.com/krystophny">Christopher Albert</a>, <a href="https://github.com/jvantillo">jvantillo</a>, <a href="https://github.com/materemias">materemias</a>, <a href="https://github.com/danheuck">danheuck</a>, <a href="https://github.com/digunix">digunix</a>, <a href="https://github.com/reisset">reisset</a>, <a href="https://github.com/goodroot">Goodroot</a>, <a href="https://github.com/robzolkos">robzolkos</a>, <a href="https://github.com/konnsim">konnsim</a>, <a href="https://github.com/IgorWarzocha">IgorWarzocha</a>, <a href="https://github.com/mzubair481">Zubair</a>, <a href="https://github.com/radiorambo">Umesh</a></p>
             </div>
         </div>
     </footer>

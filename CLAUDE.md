@@ -324,12 +324,18 @@ Expanding distribution support is a current focus:
 1. **NixOS** - Next priority for packaging
 2. **Manjaro** - Sway/Hyprland ecosystem support
 3. **Other Sway/Hyprland distros** - Expand reach to tiling WM users
+4. **Homebrew on Linux** ([#177](https://github.com/peteonrails/voxtype/issues/177))
+5. **Silverblue / atomic distros** ([#178](https://github.com/peteonrails/voxtype/issues/178))
 
 Existing packages: Arch (AUR: `voxtype`, `voxtype-bin`), Debian (.deb), Fedora (.rpm)
 
 ### Feature Roadmap
 
-Based on open issues and project direction:
+Based on open issues and project direction.
+
+**v0.7.1 (confirmed):**
+- **voxtype-models CDN** - Host every ONNX engine model voxtype downloads (Cohere variants, Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, Omnilingual, ECAPA-TDNN diarization) on Cloudflare R2 behind `models.voxtype.io`. Removes the dependency on community HF accounts (`csukuangfj/*`, `istupakov/*`, `onnx-community/*`). Plumb a `models_base_url` indirection in `src/setup/model.rs`, ship per-model `manifest.json` with sha256s, validate downloads against the manifest, and write a mirror script that pulls upstream HF and pushes to R2 byte-identically. HF stays as a fallback so users behind firewalls keep working.
+- **Streaming transcription** ([#283](https://github.com/peteonrails/voxtype/issues/283)) - Parakeet-first, English-first push-to-stream mode. On a parallel agent's branch.
 
 **Near Term:**
 - **Deterministic integration tests** - Automated smoke tests using pre-recorded audio files that can run in CI without LLM/human interaction
@@ -337,20 +343,27 @@ Based on open issues and project direction:
 
 **Medium Term:**
 - **Audio caching** ([#28](https://github.com/peteonrails/voxtype/issues/28)) - Save recordings for replay/re-transcription
-- **Eager input processing** ([#70](https://github.com/peteonrails/voxtype/issues/70)) - Start transcription while still recording
+- **Audio + output history** ([#209](https://github.com/peteonrails/voxtype/issues/209)) - Companion to audio caching; surface past dictations
+- **Native StatusNotifierItem tray** ([#267](https://github.com/peteonrails/voxtype/issues/267)) - Replace XEmbed tray for KDE Plasma / GNOME compatibility
+- **OpenAI-compatible local STT API** ([#244](https://github.com/peteonrails/voxtype/issues/244)) - Single daemon serves hotkey dictation + HTTP API for other tools
 
 **Exploratory:**
-- **Consolidated release binaries** - Reduce from 7 binaries to 3 (cpu, cuda, rocm) by combining Whisper + Vulkan + Parakeet into each binary. Vulkan and CUDA/ROCm fall back to CPU when no GPU is present, and ONNX Runtime (Parakeet) does runtime CPU dispatch. The trade-off is losing AVX-512 Whisper performance (~10-30%) and larger binaries (~35-40 MB vs 8 MB). Blocked on whisper.cpp/ggml adding runtime SIMD dispatch if AVX-512 performance must be preserved; otherwise, AVX2-only Whisper is safe on all x86-64 CPUs.
+- **Consolidated release binaries** - Reduce from 8 binaries today (avx2, avx512, vulkan, onnx-avx2, onnx-avx512, onnx-cuda-12, onnx-cuda-13, onnx-migraphx) to 3 (cpu, cuda, migraphx) by combining Whisper + Vulkan + ONNX engines into each binary. Vulkan and CUDA/MIGraphX fall back to CPU when no GPU is present, and ONNX Runtime does runtime CPU dispatch. Trade-off is losing AVX-512 Whisper performance (~10-30%) and larger binaries. Blocked on whisper.cpp/ggml adding runtime SIMD dispatch if AVX-512 performance must be preserved; otherwise, AVX2-only Whisper is safe on all x86-64 CPUs.
 - **Nemotron Speech backend** ([#47](https://github.com/peteonrails/voxtype/issues/47)) - Alternative ASR engine
-- **Foreign exception handling** ([#30](https://github.com/peteonrails/voxtype/issues/30)) - Investigate whisper.cpp crash recovery
+- **Vibe Voice backend** ([#285](https://github.com/peteonrails/voxtype/issues/285)) - Microsoft's speech model
+- **Dictation Intents** ([#231](https://github.com/peteonrails/voxtype/issues/231)) - Configurable per-shortcut behavior (translate vs transcribe, custom prompts)
+- **Parakeet sortformer for meeting diarization** - Evaluate parakeet-rs's sortformer feature as alternative to the current ml-diarization ECAPA-TDNN pipeline
 
 **Blocked/Waiting:**
-- **Parakeet MIGraphX acceleration** - When parakeet-rs 0.3.0 releases on crates.io, update AMD GPU builds to use MIGraphX instead of ROCm. The current ROCm EP has upstream ONNX Runtime compatibility issues. Consider renaming `parakeet-rocm` feature to `parakeet-migraphx`. Also check nixpkgs onnxruntime for MIGraphX support options.
+- **Nixpkgs onnxruntime MIGraphX support** - Verify the nixpkgs `onnxruntime` build (with `rocmSupport = true`) actually exposes the MIGraphX EP. The Nix flake's `parakeet-migraphx` output uses `onnxruntimeRocm` and sets `ORT_MIGRAPHX_MODEL_CACHE_PATH`; if MIGraphX isn't exposed in nixpkgs, ORT will fail to register the EP at runtime.
+- **Cohere decoder on CUDA** - Encoder runs on GPU; decoder pinned to CPU pending ORT's CUDA `GroupQueryAttention` kernel adding `attention_bias` support. Flip the second arg of `build_session(&decoder_file, threads, "decoder", false)` in `src/transcribe/cohere.rs` once ORT lands the kernel.
 
 ### Non-Goals
 
 - Windows/macOS support (Linux-first, Wayland-native)
-- GUI configuration (CLI and config file are the interface)
+- GUI configuration (GTK/Qt/web). A TUI (`voxtype configure`) is supported and
+  surfaced as a desktop-file launcher entry; CLI and config file remain the
+  primary interfaces for scripting and headless setups.
 - Continuous dictation mode (push-to-talk is the paradigm)
 
 ---
@@ -418,9 +431,11 @@ Building on hosts with newer glibc (e.g. 2.43 on CachyOS/Arch) can produce binar
 
 ### Build Strategy
 
-**CRITICAL: Every binary must be built in Docker.** Never build release binaries directly on the host, even for AVX-512 or ROCm builds that require specific hardware. Run Docker locally on the machine with the required hardware instead.
+A full release requires **8 Linux binaries** (3 Whisper variants and 5 ONNX variants) plus a macOS arm64 DMG.
 
-**Whisper Binaries:**
+**CRITICAL: Every binary must be built in Docker.** Never build release binaries directly on the host, even for AVX-512 or MIGraphX builds that require specific hardware. Run Docker locally on the machine with the required hardware instead.
+
+**Whisper Binaries (3):**
 
 | Binary | Dockerfile | Docker Context | Base Image | Max glibc |
 |--------|-----------|----------------|------------|-----------|
@@ -428,14 +443,27 @@ Building on hosts with newer glibc (e.g. 2.43 on CachyOS/Arch) can produce binar
 | Vulkan | `Dockerfile.vulkan` | Remote (pre-AVX-512) | Ubuntu 24.04 | 2.39 |
 | AVX-512 | `Dockerfile.avx512` | Local (AVX-512 host) | Ubuntu 22.04 | 2.35 |
 
-**ONNX Binaries (all ONNX engines: Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, Omnilingual):**
+**ONNX Binaries (all ONNX engines: Parakeet, Moonshine, SenseVoice, Paraformer, Dolphin, Omnilingual, Cohere):**
 
 | Binary | Dockerfile | Docker Context | Base Image | Max glibc |
 |--------|-----------|----------------|------------|-----------|
 | onnx-avx2 | `Dockerfile.onnx` | Remote (pre-AVX-512) | Ubuntu 24.04 | 2.39 |
 | onnx-avx512 | `Dockerfile.onnx-avx512` | Local (AVX-512 host) | Ubuntu 24.04 | 2.39 |
-| onnx-cuda | `Dockerfile.onnx-cuda` | Remote (NVIDIA GPU) | Ubuntu 24.04 | 2.39 |
-| onnx-rocm | `Dockerfile.onnx-rocm` | Local (AMD GPU host) | Ubuntu 24.04 | 2.39 |
+| onnx-cuda-12 | `Dockerfile.onnx-cuda-12` | Remote (NVIDIA GPU) | nvidia/cuda:12.6.1-cudnn-devel-ubuntu24.04 | 2.39 |
+| onnx-cuda-13 | `Dockerfile.onnx-cuda-13` | Remote (NVIDIA GPU) | nvidia/cuda:13.0.3-cudnn-devel-ubuntu24.04 | 2.39 |
+| onnx-migraphx | `Dockerfile.onnx-migraphx` | Local (AMD GPU host) | Ubuntu 24.04 | 2.39 |
+
+Note: ort 2.0.0-rc.12's CUDA prebuilt is selected at build time (cu12 vs cu13)
+based on the ORT_CUDA_VERSION env var or build host's CUDA install. A single
+binary is locked to one CUDA major version. v0.7.0 ships both onnx-cuda-12
+and onnx-cuda-13; the AUR PKGBUILD or `voxtype setup gpu --enable` symlinks
+voxtype-onnx-cuda to whichever variant matches the host's runtime CUDA.
+
+Each GPU-using ONNX binary ships with its companion shared libraries
+(libonnxruntime_providers_*.so) which the EP dlopens at runtime via
+/proc/self/exe. scripts/package.sh installs each variant into its own
+subdirectory under /usr/lib/voxtype/ (cuda-12/, cuda-13/, migraphx/) so
+the .so files sit alongside the binary.
 
 Note: ONNX binaries include bundled ONNX Runtime which contains AVX-512 instructions, but ONNX Runtime uses runtime CPU detection and falls back gracefully on older CPUs.
 
@@ -450,15 +478,25 @@ GPU acceleration is enabled via Cargo features:
 | `gpu-hipblas` | ROCm/HIP | AMD GPUs (alternative to Vulkan) |
 | `gpu-metal` | Metal | macOS (not applicable for Linux builds) |
 
+**CRITICAL: Always run `cargo clean` before building with different features.**
+
+When switching between feature sets (e.g., CPU-only to GPU-enabled, or between different GPU backends), stale build artifacts can cause GPU support to silently fail at runtime. The binary will compile, have a different checksum, and appear correct, but GPU acceleration won't work.
+
+This is especially insidious because:
+- The build succeeds without errors
+- The binary size and checksum differ from previous builds
+- `--version` reports correctly
+- But GPU detection fails silently at runtime (e.g., `use gpu = 0` instead of `use gpu = 1`)
+
 ```bash
 # Build with Vulkan GPU support
-cargo build --release --features gpu-vulkan
+cargo clean && cargo build --release --features gpu-vulkan
 
 # Build with CUDA GPU support
-cargo build --release --features gpu-cuda
+cargo clean && cargo build --release --features gpu-cuda
 
 # Build CPU-only (no GPU feature)
-cargo build --release
+cargo clean && cargo build --release
 ```
 
 ### Remote Docker Context
@@ -480,9 +518,13 @@ docker context use default
 
 ### Full Release Build Process
 
-**CRITICAL: Always use `--no-cache` for release builds to prevent stale binaries.**
+**CRITICAL: Always use `--no-cache` for Docker builds and `cargo clean` for local builds.**
 
-Docker caches build layers aggressively. Without `--no-cache`, you may upload binaries with old version numbers even after updating Cargo.toml. This has caused AUR packages to ship v0.4.1 binaries labeled as v0.4.5.
+Stale build artifacts cause two categories of failures:
+
+1. **Docker cache** - Without `--no-cache`, Docker may reuse layers with old version numbers. This caused AUR packages to ship v0.4.1 binaries labeled as v0.4.5.
+
+2. **Cargo incremental compilation** - Without `cargo clean`, switching between feature sets (e.g., CPU-only to `--features gpu-vulkan`) can produce binaries where GPU support silently fails at runtime. The binary compiles, has a different checksum, and reports the correct version, but GPU acceleration doesn't work. This is undetectable without actually testing GPU functionality.
 
 ```bash
 # Set version
@@ -494,25 +536,26 @@ docker compose -f docker-compose.build.yml build --no-cache avx2 vulkan onnx-avx
 docker compose -f docker-compose.build.yml up avx2 vulkan onnx-avx2
 
 # 2. Build ONNX CUDA on remote server (has NVIDIA GPU)
-docker compose -f docker-compose.build.yml build --no-cache onnx-cuda
-docker compose -f docker-compose.build.yml up onnx-cuda
+docker compose -f docker-compose.build.yml build --no-cache onnx-cuda-12 onnx-cuda-13
+docker compose -f docker-compose.build.yml up onnx-cuda-12 onnx-cuda-13
 
-# 3. Copy binaries from remote Docker volumes to local
+# 3. Copy binaries from remote Docker containers to local
 mkdir -p releases/${VERSION}
-docker run --rm -v $(pwd)/releases/${VERSION}:/test ubuntu:24.04 ls /test  # verify
-# Use tar pipe to copy from remote Docker volume:
-docker run --rm -v $(pwd)/releases/${VERSION}:/src ubuntu:24.04 tar -cf - -C /src . | tar -xf - -C releases/${VERSION}/
+docker cp macos-release-avx2-1:/output/. releases/${VERSION}/
+docker cp macos-release-vulkan-1:/output/. releases/${VERSION}/
+docker cp macos-release-onnx-avx2-1:/output/. releases/${VERSION}/
+docker cp macos-release-onnx-cuda-1:/output/. releases/${VERSION}/
 
-# 4. Build AVX-512 + ROCm binaries locally IN DOCKER (caps glibc at container version)
+# 4. Build AVX-512 + MIGraphX binaries locally IN DOCKER (caps glibc at container version)
 docker context use <your-local-context>
 
 # Whisper AVX-512 + ONNX AVX-512 (requires AVX-512 capable host)
 docker compose -f docker-compose.build.yml --profile avx512 build --no-cache avx512 onnx-avx512
 docker compose -f docker-compose.build.yml --profile avx512 up avx512 onnx-avx512
 
-# ONNX ROCm (requires AMD GPU host)
-docker compose -f docker-compose.build.yml build --no-cache onnx-rocm
-docker compose -f docker-compose.build.yml up onnx-rocm
+# ONNX MIGraphX (requires AMD GPU host)
+docker compose -f docker-compose.build.yml build --no-cache onnx-migraphx
+docker compose -f docker-compose.build.yml up onnx-migraphx
 
 # 5. VERIFY VERSIONS before uploading (critical!)
 for bin in releases/${VERSION}/voxtype-*; do
@@ -525,10 +568,10 @@ done
 
 ### Version Verification Checklist
 
-**Before uploading any release, verify ALL binaries report the correct version:**
+**Before uploading any release, verify ALL 7 binaries report the correct version:**
 
 ```bash
-# Whisper binaries
+# Whisper binaries (3)
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-avx2 --version
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-avx512 --version
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-vulkan --version
@@ -536,11 +579,34 @@ releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-vulkan --version
 # ONNX binaries
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-avx2 --version
 releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-avx512 --version
-releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-cuda --version
-releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-rocm --version
+releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-cuda-12 --version
+releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-cuda-13 --version
+releases/${VERSION}/voxtype-${VERSION}-linux-x86_64-onnx-migraphx --version
 ```
 
 If versions don't match, the Docker cache is stale. Rebuild with `--no-cache`.
+
+### Functional Verification (GPU Builds)
+
+**Version checks and checksums are NOT sufficient to verify GPU builds.** A binary can report the correct version, have the expected file size, and still have non-functional GPU support due to stale build artifacts.
+
+For GPU-enabled binaries (Vulkan, CUDA, ROCm), verify GPU is actually detected:
+
+```bash
+# Test Vulkan build - should show "use gpu = 1" and "ggml_vulkan: Found N devices"
+./voxtype-${VERSION}-linux-x86_64-vulkan daemon &
+sleep 3
+journalctl --user -u voxtype --since "10 seconds ago" | grep -E "(use gpu|ggml_vulkan|Found.*devices)"
+# Expected: "use gpu = 1", "ggml_vulkan: Found 1 Vulkan devices"
+# Bad: "use gpu = 0" or "no GPU found"
+
+# For ONNX ROCm - should show ROCm execution provider
+./voxtype-${VERSION}-linux-x86_64-onnx-rocm daemon &
+sleep 3
+journalctl --user -u voxtype --since "10 seconds ago" | grep -iE "(rocm|execution provider)"
+```
+
+If GPU detection fails but the binary otherwise works, the build used stale artifacts. Run `cargo clean` and rebuild.
 
 ### Validating Binaries (AVX-512 Detection)
 
@@ -590,8 +656,9 @@ done
 | vulkan | Ubuntu 24.04 | 2.39 |
 | onnx-avx2 | Ubuntu 24.04 | 2.39 |
 | onnx-avx512 | Ubuntu 24.04 | 2.39 |
-| onnx-cuda | Ubuntu 24.04 | 2.39 |
-| onnx-rocm | Ubuntu 24.04 | 2.39 |
+| onnx-cuda-12 | Ubuntu 24.04 | 2.39 |
+| onnx-cuda-13 | Ubuntu 24.04 | 2.39 |
+| onnx-migraphx | Ubuntu 24.04 | 2.39 |
 
 If any binary exceeds its expected glibc version, it was likely built outside Docker. Rebuild it in the appropriate Docker container.
 
