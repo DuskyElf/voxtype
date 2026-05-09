@@ -34,11 +34,21 @@ Hold a hotkey (default: ScrollLock) while speaking, release to transcribe and ou
 
 ## Quick Start
 
+Most users should install a [pre-built package](docs/INSTALL.md). The steps below are for building from source.
+
 ```bash
-# 1. Build
+# 1. Install build dependencies
+# Fedora:
+sudo dnf install rust cargo alsa-lib-devel clang-devel cmake pkgconf
+# Arch:
+sudo pacman -S rustup alsa-lib clang cmake pkgconf
+# Debian/Ubuntu:
+sudo apt install cargo libasound2-dev libclang-dev cmake pkg-config
+
+# 2. Build
 cargo build --release
 
-# 2. Install typing backend (Wayland)
+# 3. Install typing backend (Wayland)
 # Fedora:
 sudo dnf install wtype
 # Arch:
@@ -46,15 +56,17 @@ sudo pacman -S wtype
 # Ubuntu:
 sudo apt install wtype
 
-# 3. Download whisper model
+# 4. Download whisper model
 ./target/release/voxtype setup --download
 
-# 4. Add keybinding to your compositor
+# 5. Add keybinding to your compositor
 # See "Compositor Keybindings" section below
 
-# 5. Run
+# 6. Run
 ./target/release/voxtype
 ```
+
+For the full per-distro dependency matrix (including GPU backends), see [docs/INSTALL.md](docs/INSTALL.md#build-dependencies-source-builds-only).
 
 ### Compositor Keybindings
 
