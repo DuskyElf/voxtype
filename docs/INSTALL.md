@@ -1,543 +1,437 @@
 # Voxtype Installation Guide
 
-This guide covers all methods for installing Voxtype on Linux systems.
+This guide covers installing Voxtype on Linux and macOS.
 
 ## Table of Contents
 
 - [System Requirements](#system-requirements)
 - [Quick Install](#quick-install)
 - [Installation Methods](#installation-methods)
-  - [Arch Linux (AUR)](#arch-linux-aur)
-  - [Debian/Ubuntu](#debianubuntu)
-  - [Fedora/RHEL](#fedorarhel)
-  - [Building from Source](#building-from-source)
-  - [Cargo Install](#cargo-install)
-- [Post-Installation Setup](#post-installation-setup)
-- [Whisper Model Download](#whisper-model-download)
-- [Starting Voxtype](#starting-voxtype)
-- [Verifying Installation](#verifying-installation)
-- [Uninstallation](#uninstallation)
+  - [Arch Linux](#arch-linux)
+  - [Debian / Ubuntu](#debian--ubuntu)
+  - [Fedora / RHEL](#fedora--rhel)
+  - [macOS](#macos)
+  - [NixOS](#nixos)
+  - [AppImage](#appimage)
+  - [Build from Source](#build-from-source)
+- [Post-Install Setup](#post-install-setup)
+- [GPU Acceleration](#gpu-acceleration)
+- [Verifying the Install](#verifying-the-install)
+- [Uninstall](#uninstall)
+- [Troubleshooting](#troubleshooting)
 
 ---
 
 ## System Requirements
 
-### Supported Platforms
+### Platforms
 
-- **Linux** with any desktop environment (GNOME, KDE Plasma, Sway, Hyprland, i3, etc.)
-- Optimized for Wayland, works on X11 too
-- Architectures: x86_64, aarch64
+- **Linux:** any desktop. Optimized for Wayland, works on X11.
+- **macOS:** Apple Silicon (arm64), macOS 13 Ventura or later.
+- Architectures: x86_64 (with AVX2) and aarch64 on Linux; arm64 on macOS.
 
-### Runtime Dependencies
+### CPU (prebuilt Linux binaries)
 
-| Component | Required | Purpose |
-|-----------|----------|---------|
-| Linux desktop | Yes | Wayland or X11 |
-| PipeWire or PulseAudio | Yes | Audio capture |
-| pipewire-alsa | Yes (if using PipeWire) | Routes ALSA audio through PipeWire |
-| `input` group membership | Yes | Hotkey detection via evdev |
-| wtype | Recommended | Keyboard simulation on Wayland (best CJK support) |
-| ydotool | Recommended | Keyboard simulation on X11 (or Wayland fallback) |
-| wl-clipboard | Recommended | Clipboard fallback on Wayland |
-| libnotify | Optional | Desktop notifications |
+Prebuilt binaries target the **x86-64-v3 baseline**: AVX2, FMA, BMI1, BMI2, F16C, MOVBE. Supported:
 
-> **Note:** Most modern Linux distributions use PipeWire for audio. If you're using PipeWire, you must install `pipewire-alsa` to allow ALSA applications (like Voxtype) to capture audio. Without it, you'll get "device not available" errors.
+- Intel Haswell (2013) and newer
+- AMD Excavator (2015), Ryzen (any generation), EPYC
 
-### Build Dependencies (source builds only)
+Older CPUs need to [build from source](#build-from-source) with `-C target-cpu=native`. Voxtype installs a SIGILL handler at startup that prints a helpful message instead of a raw "Illegal instruction" crash when the CPU is too old.
+
+### glibc (Linux .deb and .rpm)
+
+| Distro | Minimum version | glibc |
+|--------|----------------|-------|
+| Ubuntu | 24.04 (Noble) | 2.39 |
+| Debian | Trixie (13) | 2.41 |
+| Fedora | 40 | 2.39 |
+| Arch Linux | Rolling | 2.40+ |
+
+Older distros (Ubuntu 22.04, Debian Bookworm, Fedora 39) can [build from source](#build-from-source) instead.
+
+### Runtime dependencies
+
+| Component | Required? | Purpose |
+|-----------|-----------|---------|
+| PipeWire (with `pipewire-alsa`) or PulseAudio | Yes | Audio capture |
+| `input` group membership | Yes (for evdev hotkeys) | Detecting hotkeys outside the compositor |
+| `wtype` | Recommended (Wayland) | Best Unicode/CJK typing support |
+| `dotool` | Recommended (KDE/GNOME Wayland) | Typing on compositors that don't speak the virtual-keyboard protocol |
+| `ydotool` | Fallback (X11/TTY) | Requires a daemon |
+| `wl-clipboard` | Recommended | Clipboard fallback |
+| `libnotify` | Optional | Desktop notifications |
+| `playerctl` | Optional | Pause MPRIS players while recording |
+| `gtk4-layer-shell` | Optional | Runtime for the GTK4 OSD visualizer |
+
+> **PipeWire users:** install `pipewire-alsa` so ALSA-based apps like Voxtype can capture audio. Without it you get "device not available" errors.
+
+### Build dependencies (source builds only)
 
 | Package | Arch | Debian/Ubuntu | Fedora |
 |---------|------|---------------|--------|
-| Rust toolchain | `rustup` | `rustc cargo` | `rust cargo` |
-| ALSA dev libs | `alsa-lib` | `libasound2-dev` | `alsa-lib-devel` |
+| Rust toolchain | `rustup` | `cargo rustc` | `rust cargo` |
+| ALSA dev | `alsa-lib` | `libasound2-dev` | `alsa-lib-devel` |
 | Clang | `clang` | `libclang-dev` | `clang-devel` |
 | CMake | `cmake` | `cmake` | `cmake` |
 | pkg-config | `pkgconf` | `pkg-config` | `pkgconf` |
 
-### GPU Acceleration
-
-**Vulkan (included in packages):** Packages include a pre-built Vulkan binary. Just install the runtime and enable:
-
-| Distro | Install Runtime | Enable GPU |
-|--------|-----------------|------------|
-| Arch | `sudo pacman -S vulkan-icd-loader` | `sudo voxtype setup gpu --enable` |
-| Debian/Ubuntu | `sudo apt install libvulkan1` | `sudo voxtype setup gpu --enable` |
-| Fedora | `sudo dnf install vulkan-loader` | `sudo voxtype setup gpu --enable` |
-
-**Other backends (build from source):** For CUDA, Metal, or ROCm, build from source:
-
-| GPU Backend | Build Dependencies | Build Command |
-|-------------|-------------------|---------------|
-| CUDA | `cuda` / `nvidia-cuda-toolkit` | `cargo build --release --features gpu-cuda` |
-| Metal | (macOS only) | `cargo build --release --features gpu-metal` |
-| HIP/ROCm | ROCm SDK | `cargo build --release --features gpu-hipblas` |
-
----
-
-## System Requirements
-
-Pre-built packages require **glibc 2.38 or newer**:
-
-| Distro | Minimum Version | glibc |
-|--------|-----------------|-------|
-| Ubuntu | 24.04 (Noble) | 2.39 |
-| Fedora | 39+ | 2.38 |
-| Arch Linux | Rolling | 2.40+ |
-| Debian | Trixie (13) | 2.38 |
-
-Older distributions (Ubuntu 22.04, Debian Bookworm) can build from source.
+For the GTK4 OSD frontend, additionally install `gtk4` + `gtk4-layer-shell`.
 
 ---
 
 ## Quick Install
 
-### One-liner (from source)
+Pick your distro from the list below. The fastest path on each:
 
-```bash
-# Install dependencies, build, and setup (Arch)
-sudo pacman -S --needed base-devel rust clang alsa-lib wtype wl-clipboard && \
-git clone https://github.com/peteonrails/voxtype && cd voxtype && \
-cargo build --release && \
-sudo cp target/release/voxtype /usr/local/bin/ && \
-sudo usermod -aG input $USER && \
-echo "Log out and back in, then run: voxtype setup --download"
-```
+- **Arch:** `paru -S voxtype-bin`
+- **Debian/Ubuntu:** `sudo apt install ./voxtype_0.7.1-1_amd64.deb`
+- **Fedora:** `sudo dnf install ./voxtype-0.7.1-1.x86_64.rpm`
+- **macOS:** `brew install --cask voxtype`
+- **NixOS:** `nix profile install github:peteonrails/voxtype#vulkan`
+- **AppImage:** download, `chmod +x`, run.
+
+After install, see [Post-Install Setup](#post-install-setup) for the model download, hotkey, and systemd-service steps.
 
 ---
 
 ## Installation Methods
 
-### Arch Linux (AUR)
+### Arch Linux
 
-#### Using an AUR helper (recommended)
+Two AUR packages:
+
+- **`voxtype-bin`** — prebuilt binaries, installs in seconds. **Recommended for most users.**
+- **`voxtype`** — builds from source via cargo, 20+ minutes.
 
 ```bash
-# Using paru
-paru -S voxtype
+# Recommended: prebuilt binaries
+paru -S voxtype-bin       # or: yay -S voxtype-bin
 
-# Using yay
-yay -S voxtype
+# Or build from source
+paru -S voxtype           # or: yay -S voxtype
+
+# Or manual AUR clone
+git clone https://aur.archlinux.org/voxtype-bin.git
+cd voxtype-bin && makepkg -si
 ```
 
-#### Manual AUR build
+Recommended optional packages:
 
 ```bash
-git clone https://aur.archlinux.org/voxtype.git
-cd voxtype
-makepkg -si
+sudo pacman -S wtype wl-clipboard libnotify gtk4-layer-shell pipewire-alsa
 ```
 
-#### Dependencies installed automatically
+The post-install hook auto-picks the right CUDA variant (`cuda-12` vs `cuda-13`) based on your installed libcudart, and sets up `/usr/bin/voxtype` as a wrapper that dispatches to the matching binary.
 
-- `alsa-lib` (runtime)
-- `cargo`, `clang` (build-time)
+### Debian / Ubuntu
 
-#### Optional dependencies
+Requires Ubuntu 24.04+ or Debian Trixie+ (glibc 2.39+). Older versions: [build from source](#build-from-source).
 
 ```bash
-# Install recommended optional packages
-sudo pacman -S wtype wl-clipboard libnotify
-
-# If using PipeWire (most Arch systems), install ALSA compatibility:
-sudo pacman -S pipewire-alsa
-
-# For X11 or as Wayland fallback:
-sudo pacman -S ydotool
+wget https://github.com/peteonrails/voxtype/releases/download/v0.7.1/voxtype_0.7.1-1_amd64.deb
+sudo apt install ./voxtype_0.7.1-1_amd64.deb
 ```
 
----
-
-### Debian/Ubuntu
-
-#### From .deb package
+Recommended optional packages:
 
 ```bash
-# Download the latest release
-wget https://github.com/peteonrails/voxtype/releases/download/v0.1.0/voxtype_0.1.0-1_amd64.deb
-
-# Install
-sudo dpkg -i voxtype_0.1.0-1_amd64.deb
-
-# Install any missing dependencies
-sudo apt-get install -f
+sudo apt install wtype wl-clipboard libnotify-bin playerctl pipewire-alsa
 ```
 
-#### Building the .deb package
+The .deb ships every Linux binary variant (avx2, avx512, vulkan, plus ONNX CPU/CUDA/MIGraphX) under `/usr/lib/voxtype/`. Run `sudo voxtype setup gpu --enable` after install to pick a GPU binary.
+
+### Fedora / RHEL
+
+Requires Fedora 40+ (glibc 2.39+).
 
 ```bash
-# Install build dependencies
-sudo apt install build-essential cargo rustc libclang-dev libasound2-dev \
-    pkg-config debhelper devscripts
-
-# Clone and build
-git clone https://github.com/peteonrails/voxtype
-cd voxtype
-
-# Build the package
-dpkg-buildpackage -us -uc -b
-
-# Install
-sudo dpkg -i ../voxtype_0.1.0-1_*.deb
+wget https://github.com/peteonrails/voxtype/releases/download/v0.7.1/voxtype-0.7.1-1.x86_64.rpm
+sudo dnf install ./voxtype-0.7.1-1.x86_64.rpm
 ```
 
-#### Install recommended packages
+Recommended optional packages:
 
 ```bash
-# For Wayland:
-sudo apt install wtype wl-clipboard libnotify-bin
-# For X11 or as fallback:
-sudo apt install ydotool
+sudo dnf install wtype wl-clipboard libnotify playerctl pipewire-alsa
 ```
 
----
+Fedora's ydotool ships as a system service that needs extra setup. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#ydotool-daemon-not-running) if you need ydotool specifically; otherwise `wtype` (Wayland) or `dotool` (KDE/GNOME Wayland) is the better default.
 
-### Fedora/RHEL
+### macOS
 
-#### From COPR (when available)
+Apple Silicon only. Uses Microsoft ONNX Runtime so every engine is available, including Parakeet on the Neural Engine path.
 
 ```bash
-sudo dnf copr enable pete/voxtype
-sudo dnf install voxtype
+brew install --cask voxtype
 ```
 
-#### From .rpm package
+Or download `voxtype-0.7.1-macOS-arm64.dmg` from the [latest release](https://github.com/peteonrails/voxtype/releases/latest). First launch opens a setup wizard that walks you through accessibility permissions, model download, and the FN-key hotkey.
+
+### NixOS
+
+A flake ships every variant:
 
 ```bash
-# Download the latest release
-wget https://github.com/peteonrails/voxtype/releases/download/v0.1.0/voxtype-0.1.0-1.fc39.x86_64.rpm
+# Imperative install
+nix profile install github:peteonrails/voxtype/v0.7.1#vulkan
 
-# Install
-sudo dnf install ./voxtype-0.1.0-1.fc39.x86_64.rpm
+# Available outputs: default, vulkan, cuda, rocm, osdGtk4, osdNative
+nix build github:peteonrails/voxtype/v0.7.1#osdGtk4
+
+# Or pin in your flake inputs
+inputs.voxtype.url = "github:peteonrails/voxtype/v0.7.1";
 ```
 
-#### Building the .rpm package
+### AppImage
+
+Self-contained binary for distros that don't have a packaged voxtype.
 
 ```bash
-# Install build dependencies
-sudo dnf install cargo rust clang-devel alsa-lib-devel rpm-build rpmdevtools
-
-# Setup rpmbuild directories
-rpmdev-setuptree
-
-# Download source tarball to SOURCES
-wget -O ~/rpmbuild/SOURCES/voxtype-0.1.0.tar.gz \
-    https://github.com/peteonrails/voxtype/archive/v0.1.0.tar.gz
-
-# Copy spec file
-cp packaging/rpm/voxtype.spec ~/rpmbuild/SPECS/
-
-# Build
-rpmbuild -ba ~/rpmbuild/SPECS/voxtype.spec
-
-# Install
-sudo dnf install ~/rpmbuild/RPMS/x86_64/voxtype-0.1.0-1.*.rpm
+wget https://github.com/peteonrails/voxtype/releases/download/v0.7.1/voxtype-0.7.1-x86_64.AppImage
+chmod +x voxtype-0.7.1-x86_64.AppImage
+mv voxtype-0.7.1-x86_64.AppImage ~/.local/bin/voxtype
 ```
 
-#### Install recommended packages
+Three AppImage variants ship: CPU, Vulkan, ONNX engines. The CPU one is the smallest and the right default for most users.
+
+### Build from Source
+
+For older distros, custom CPU targets (pre-Haswell hardware), or non-default feature combinations.
 
 ```bash
-# For Wayland:
-sudo dnf install wtype wl-clipboard libnotify
-# For X11 or as fallback:
-sudo dnf install ydotool
-```
-
----
-
-### Building from Source
-
-#### 1. Install Rust (if not already installed)
-
-```bash
+# 1. Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source ~/.cargo/env
-```
 
-#### 2. Install build dependencies
+# 2. Install build dependencies for your distro
+# Arch:
+sudo pacman -S rustup alsa-lib clang cmake pkgconf
+# Debian/Ubuntu:
+sudo apt install cargo libasound2-dev libclang-dev cmake pkg-config
+# Fedora:
+sudo dnf install rust cargo alsa-lib-devel clang-devel cmake pkgconf
 
-**Arch Linux:**
-```bash
-sudo pacman -S base-devel clang alsa-lib
-```
-
-**Debian/Ubuntu:**
-```bash
-sudo apt install build-essential libclang-dev libasound2-dev pkg-config
-```
-
-**Fedora:**
-```bash
-sudo dnf install @development-tools clang-devel alsa-lib-devel
-```
-
-#### 3. Clone and build
-
-```bash
+# 3. Clone and build
 git clone https://github.com/peteonrails/voxtype
 cd voxtype
 cargo build --release
-```
 
-#### 4. Install
-
-```bash
-# Install binary
+# 4. Install
 sudo install -Dm755 target/release/voxtype /usr/local/bin/voxtype
-
-# Install config (optional - will be created on first run)
-sudo install -Dm644 config/default.toml /etc/voxtype/config.toml
-
-# Install systemd service (optional)
-install -Dm644 packaging/systemd/voxtype.service \
-    ~/.config/systemd/user/voxtype.service
 ```
 
----
+#### Feature flags
 
-### Cargo Install
+| Feature | What it adds |
+|---------|--------------|
+| `gpu-vulkan` | Vulkan GPU for Whisper (NVIDIA/AMD/Intel) |
+| `gpu-cuda` | CUDA GPU for Whisper (NVIDIA) |
+| `gpu-hipblas` | ROCm/HIP for Whisper (AMD) |
+| `parakeet` | Parakeet ASR engine (ONNX-based) |
+| `parakeet-migraphx` | Parakeet on AMD MIGraphX |
+| `parakeet-cuda` | Parakeet on NVIDIA CUDA |
+| `moonshine`, `sensevoice`, `paraformer`, `dolphin`, `omnilingual`, `cohere` | Additional ONNX engines |
+| `osd-gtk4` | GTK4 on-screen visualizer |
+| `osd-native` | wgpu + egui on-screen visualizer |
 
-The simplest method if you have Rust installed:
+Example: full ONNX engine set with MIGraphX:
 
 ```bash
-# Install build dependencies first (see above)
+cargo build --release --features parakeet-migraphx,moonshine,sensevoice,paraformer,dolphin,omnilingual,cohere,ml-diarization
+```
 
-# Install from crates.io (when published)
-cargo install voxtype
+#### Pre-Haswell CPUs
 
-# Or install from git
-cargo install --git https://github.com/peteonrails/voxtype
+If you're on a pre-2013 Intel or pre-2015 AMD CPU, set `target-cpu=native` to use whatever instructions your CPU actually supports:
+
+```bash
+RUSTFLAGS="-C target-cpu=native" cargo build --release
 ```
 
 ---
 
-## Post-Installation Setup
+## Post-Install Setup
 
-> **Quick path**: most settings can be configured interactively with
-> `voxtype configure` (or by searching for "Voxtype Configuration" in
-> Walker / fuzzel / rofi / GNOME Activities). The steps below set up the
-> system-level pieces the TUI can't change for you (input-group membership,
-> typing backend, model download, daemon enable). See
-> [USER_MANUAL.md](USER_MANUAL.md#voxtype-configure) for the TUI keybindings.
+> Most settings can be configured interactively with `voxtype configure` (or by searching for "Voxtype Configuration" in Walker, fuzzel, rofi, KRunner, or GNOME Activities). The steps below set up the system-level pieces the TUI can't change for you.
 
-### 1. Add user to input group
+### 1. Add yourself to the input group
 
-Voxtype uses the Linux evdev subsystem to detect hotkeys, which requires `input` group membership:
+For kernel-level hotkey detection via evdev:
 
 ```bash
 sudo usermod -aG input $USER
 ```
 
-**Important:** You must log out and back in for the group change to take effect. Verify with:
+Log out and back in for the group change to take effect. Verify:
 
 ```bash
 groups | grep input
 ```
 
-### 2. Install typing backend
+If you only use compositor keybindings (Hyprland, Sway, River, KDE custom shortcuts) you can skip this step.
 
-**On Wayland (recommended):** Install wtype for best CJK/Unicode support
-```bash
-# Fedora:
-sudo dnf install wtype
-# Arch:
-sudo pacman -S wtype
-# Ubuntu:
-sudo apt install wtype
-```
-
-**On X11:** Install and enable ydotool
-```bash
-# Fedora:
-sudo dnf install ydotool
-# Arch:
-sudo pacman -S ydotool
-# Ubuntu:
-sudo apt install ydotool
-
-# Enable and start the daemon (Arch/Ubuntu)
-systemctl --user enable --now ydotool
-```
-
-> **Note (Fedora):** Fedora's ydotool uses a system service that requires additional configuration. See [Troubleshooting - ydotool daemon not running](TROUBLESHOOTING.md#ydotool-daemon-not-running) for Fedora-specific setup.
-
-**On KDE Plasma or GNOME (Wayland):** wtype does not work on these desktops because they don't support the virtual keyboard protocol. Install dotool (recommended) or use ydotool:
-
-For dotool (recommended, supports keyboard layouts):
-```bash
-# Install dotool (check your distribution's package manager or AUR)
-# Add user to input group for uinput access
-sudo usermod -aG input $USER
-# Log out and back in
-```
-
-For ydotool:
-```bash
-# Install ydotool (see commands above for your distro)
-# Then enable and start the daemon (required!)
-systemctl --user enable --now ydotool  # Arch/Ubuntu
-# For Fedora, see Troubleshooting guide for system service setup
-```
-
-Voxtype uses wtype on Wayland (no daemon needed), with dotool and ydotool as fallbacks, and clipboard as the last resort. On KDE/GNOME Wayland, wtype will fail and voxtype will use dotool or ydotool.
-
-### 3. Verify audio setup
-
-Ensure your audio system is working:
+### 2. Download a Whisper model
 
 ```bash
-# List audio sources
-pactl list sources short
-
-# Test recording (speak and listen)
-arecord -d 3 -f S16_LE -r 16000 test.wav && aplay test.wav && rm test.wav
-```
-
----
-
-## Whisper Model Download
-
-Voxtype needs a Whisper model for speech recognition. Use the built-in setup command:
-
-```bash
-# Interactive setup (checks dependencies and offers to download)
+# Interactive: checks the install and offers to download
 voxtype setup
 
-# Download the default model (base.en)
+# Or directly download the default (base.en, 142 MB)
 voxtype setup --download
 
-# Interactive model selection (choose from available models)
+# Or pick another model interactively
 voxtype setup model
 ```
 
-### Available Models
+| Model | Size | Speed (CPU) | Best for |
+|-------|------|-------------|----------|
+| `tiny.en` | 39 MB | Fastest | Quick notes, low-end hardware |
+| **`base.en`** | 142 MB | Fast | **Recommended default** |
+| `small.en` | 466 MB | Medium | Higher accuracy |
+| `medium.en` | 1.5 GB | Slow | Professional transcription |
+| `large-v3-turbo` | 1.6 GB | Fast on GPU | Multilingual, best accuracy |
 
-| Model | Size | Speed | Accuracy | Best For |
-|-------|------|-------|----------|----------|
-| tiny.en | 39 MB | Fastest | Good | Quick notes, low-end hardware |
-| **base.en** | 142 MB | Fast | Better | **Recommended for most users** |
-| small.en | 466 MB | Medium | Great | Higher accuracy needs |
-| medium.en | 1.5 GB | Slow | Excellent | Professional transcription |
-| large-v3 | 3.1 GB | Slowest | Best | Maximum accuracy, multilingual |
+`.en` models are English-only but faster than their multilingual siblings.
 
-`.en` models are English-only but faster and more accurate for English content.
+For the ONNX engines (Parakeet, Cohere, etc.) the equivalent is `voxtype setup model` — pick an engine and it downloads the right model from HuggingFace.
 
-### Manual Model Download
-
-If you prefer to download manually:
+### 3. Start the daemon
 
 ```bash
-mkdir -p ~/.local/share/voxtype/models
-
-# Download base.en (recommended)
-curl -L -o ~/.local/share/voxtype/models/ggml-base.en.bin \
-    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
-```
-
----
-
-## Starting Voxtype
-
-### Manual start
-
-```bash
-# Run in foreground (for testing)
-voxtype
-
-# With verbose output
-voxtype -v
-
-# With debug logging
-voxtype -vv
-```
-
-### Systemd user service
-
-```bash
-# Enable and start
+# Via systemd user service (recommended; auto-starts on login)
 systemctl --user enable --now voxtype
 
-# Check status
-systemctl --user status voxtype
-
-# View logs
-journalctl --user -u voxtype -f
+# Or run in foreground for testing
+voxtype daemon -v
 ```
 
-### Usage
+### 4. Wire up a hotkey
 
-1. Run `voxtype` (daemon starts listening)
-2. Hold **ScrollLock** (or your configured hotkey)
-3. Speak your text
-4. Release the key
-5. Text appears at cursor (or in clipboard)
+The default is **Pause** key via evdev (kernel-level). To change, run `voxtype configure` and edit the `[hotkey]` section.
 
-Press **Ctrl+C** to stop the daemon.
+**Compositor keybindings (preferred):** disable evdev (`[hotkey] enabled = false`) and bind in your compositor instead. Voxtype provides `voxtype record start/stop/toggle` commands.
+
+```toml
+# ~/.config/voxtype/config.toml
+[hotkey]
+enabled = false
+```
+
+Hyprland (`~/.config/hypr/hyprland.conf`):
+
+```
+bind  = SUPER, V, exec, voxtype record start
+bindr = SUPER, V, exec, voxtype record stop
+```
+
+Sway (`~/.config/sway/config`):
+
+```
+bindsym $mod+v exec voxtype record start
+bindsym --release $mod+v exec voxtype record stop
+```
+
+River (`~/.config/river/init`):
+
+```
+riverctl map normal Super V spawn 'voxtype record start'
+riverctl map -release normal Super V spawn 'voxtype record stop'
+```
+
+KDE Plasma: System Settings → Shortcuts → Custom Shortcuts. See [USER_MANUAL.md](USER_MANUAL.md#kde-plasma) for the full walkthrough.
+
+GNOME / X11 / other: leave evdev enabled (`[hotkey] enabled = true`) and use the configured key.
 
 ---
 
-## Verifying Installation
+## GPU Acceleration
 
-Run the setup command to verify everything is working:
+Linux packages ship a Vulkan Whisper binary and per-vendor ONNX engine binaries. After install, point the wrapper at the right one:
+
+```bash
+sudo voxtype setup gpu --enable
+```
+
+The command auto-detects your GPU and installs the matching runtime symlinks. To override:
+
+```bash
+sudo voxtype setup gpu --enable --backend vulkan      # Whisper on Vulkan
+sudo voxtype setup gpu --enable --backend onnx-cuda   # ONNX engines on NVIDIA
+sudo voxtype setup gpu --enable --backend onnx-migraphx  # ONNX engines on AMD
+```
+
+### Runtime packages
+
+| Vendor | Whisper (Vulkan) | ONNX (engine-specific) |
+|--------|------------------|------------------------|
+| NVIDIA | `vulkan-icd-loader` (Arch) / `libvulkan1` (Debian) / `vulkan-loader` (Fedora) | `cuda` (CUDA 13, driver 580+) or `cuda12.6` (CUDA 12, driver 525+) |
+| AMD | same Vulkan loader | `rocm-hip-runtime` 7.x for MIGraphX |
+| Intel | same Vulkan loader | n/a (CPU only) |
+
+NVIDIA users: the AUR `voxtype-bin` post-install hook auto-picks `voxtype-onnx-cuda-12` or `-13` based on your installed libcudart. The .deb/.rpm don't have that hook; run `voxtype setup gpu --enable` after install.
+
+AMD users on ROCm < 7.x will silently fall back to CPU when the MIGraphX EP fails to register. First MIGraphX inference compiles the model graph (~30-60s on Radeon RX 7000-class); subsequent runs are fast.
+
+For details on what each ONNX engine supports per GPU, see the matrix in [CONFIGURATION.md](CONFIGURATION.md#engine-and-backend-matrix).
+
+---
+
+## Verifying the Install
 
 ```bash
 voxtype setup
 ```
 
-This checks:
-- [x] User in `input` group
-- [x] Audio system accessible
-- [x] wtype, dotool, or ydotool available (optional)
-- [x] Whisper model downloaded
-- [x] Configuration valid
+Checks:
 
-### Test transcription
+- [x] User in `input` group (if evdev hotkey is enabled)
+- [x] Audio source accessible
+- [x] Typing backend present (`wtype` / `dotool` / `ydotool` / clipboard)
+- [x] Whisper model downloaded
+- [x] Configuration parses cleanly
+- [x] GPU backend is registering (for variants with GPU support)
+
+Test transcription against a WAV file:
 
 ```bash
-# Record a test file
 arecord -d 5 -f S16_LE -r 16000 test.wav
-
-# Transcribe it
 voxtype transcribe test.wav
-
-# Clean up
 rm test.wav
+```
+
+Or use the smoke-test command which exercises the full pipeline:
+
+```bash
+voxtype info             # daemon state, active binary, engine, model
+systemctl --user status voxtype
+journalctl --user -u voxtype -f
 ```
 
 ---
 
-## Uninstallation
-
-### Arch Linux
+## Uninstall
 
 ```bash
-sudo pacman -R voxtype
-```
+# Arch
+sudo pacman -R voxtype          # or voxtype-bin
 
-### Debian/Ubuntu
-
-```bash
+# Debian / Ubuntu
 sudo apt remove voxtype
-```
 
-### Fedora
-
-```bash
+# Fedora
 sudo dnf remove voxtype
-```
 
-### Manual/Cargo install
+# macOS
+brew uninstall --cask voxtype
 
-```bash
-# Remove binary
+# Manual / cargo install
 sudo rm /usr/local/bin/voxtype
-# or
 cargo uninstall voxtype
 
-# Remove config and data (optional)
-rm -rf ~/.config/voxtype
-rm -rf ~/.local/share/voxtype
-
-# Remove systemd service
-rm ~/.config/systemd/user/voxtype.service
+# Remove user data (optional)
+rm -rf ~/.config/voxtype ~/.local/share/voxtype
+systemctl --user disable --now voxtype
+rm -f ~/.config/systemd/user/voxtype.service
 systemctl --user daemon-reload
 ```
 
@@ -545,44 +439,40 @@ systemctl --user daemon-reload
 
 ## Troubleshooting
 
-See the [Troubleshooting Guide](TROUBLESHOOTING.md) for common issues and solutions.
+For the full troubleshooting guide see [TROUBLESHOOTING.md](TROUBLESHOOTING.md). Common quick fixes:
 
-### Quick fixes
+**"Cannot open input device"** — User isn't in `input` group, or hasn't logged out/in since adding:
 
-**"Cannot open input device"**
 ```bash
-sudo usermod -aG input $USER
-# Log out and back in
+sudo usermod -aG input $USER  # then log out and back in
 ```
 
-**Text not typing (Wayland)**
+**Text isn't typing (Wayland)** — Install `wtype` for wlroots compositors, or `dotool` for KDE/GNOME:
+
 ```bash
-# Install wtype
-sudo pacman -S wtype  # or apt/dnf
+sudo apt install wtype     # or pacman -S / dnf install
 ```
 
-**Text not typing (X11)**
+**No audio captured / "device not available"** — PipeWire users need the ALSA bridge:
+
 ```bash
-systemctl --user enable --now ydotool
+sudo apt install pipewire-alsa
 ```
 
-**No audio captured / "device not available"**
-```bash
-# If using PipeWire, install ALSA compatibility layer
-sudo pacman -S pipewire-alsa  # Arch
-sudo apt install pipewire-alsa  # Debian/Ubuntu
-sudo dnf install pipewire-alsa  # Fedora
+**Daemon shows "CPU (native)" but I installed the GPU binary** — Run the wrapper setup so `/usr/bin/voxtype` points at the right variant:
 
-# Check PipeWire/PulseAudio is running
-pactl info
-# Check default source
-pactl get-default-source
+```bash
+sudo voxtype setup gpu --enable
 ```
+
+**SIGILL ("Illegal instruction") on startup** — Your CPU is older than our Haswell baseline (AVX2 + FMA + BMI1/2). Build from source with `RUSTFLAGS="-C target-cpu=native"` or open an issue with your `lscpu` output.
 
 ---
 
 ## Getting Help
 
-- **Documentation:** https://voxtype.dev/docs
-- **Issues:** https://github.com/peteonrails/voxtype/issues
-- **Discussions:** https://github.com/peteonrails/voxtype/discussions
+- **Website:** [voxtype.io](https://voxtype.io)
+- **User manual:** [USER_MANUAL.md](USER_MANUAL.md)
+- **Configuration reference:** [CONFIGURATION.md](CONFIGURATION.md)
+- **Issues:** [github.com/peteonrails/voxtype/issues](https://github.com/peteonrails/voxtype/issues)
+- **Discussions:** [github.com/peteonrails/voxtype/discussions](https://github.com/peteonrails/voxtype/discussions)
