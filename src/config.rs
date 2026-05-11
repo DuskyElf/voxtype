@@ -210,12 +210,27 @@ type_delay_ms = 0
 # Allows time for the paste operation to complete (default: 200)
 # restore_clipboard_delay_ms = 200
 
+# Wait for modifier keys to be released before typing (default: true)
+# Prevents transcribed letters from combining with held modifiers (Ctrl/Alt/
+# Shift/Super) and triggering compositor or application keybindings. Reads
+# modifier state via evdev; requires user to be in the 'input' group.
+# Silently disabled when /dev/input is unreadable, so output proceeds as
+# before in that case.
+# wait_for_modifier_release = true
+
+# Maximum milliseconds to wait for modifier release before falling back to
+# clipboard output. Prevents a stuck modifier from indefinitely blocking
+# transcription delivery. (default: 750)
+# modifier_release_timeout_ms = 750
+
 # Pre/post output hooks (optional)
 # Commands to run before and after typing output. Useful for compositor integration.
 # Example: Block modifier keys during typing with Hyprland submap:
 #   pre_output_command = "hyprctl dispatch submap voxtype_suppress"
 #   post_output_command = "hyprctl dispatch submap reset"
 # See troubleshooting docs for the required Hyprland submap configuration.
+# Note: usually unnecessary now that wait_for_modifier_release is enabled by
+# default; the submap workaround is only needed if /dev/input is unreadable.
 
 # Post-processing command (optional)
 # Pipe transcribed text through an external command for cleanup before output.
@@ -1886,6 +1901,27 @@ pub struct OutputConfig {
     /// Allows time for the paste operation to complete
     #[serde(default = "default_restore_clipboard_delay")]
     pub restore_clipboard_delay_ms: u32,
+
+    /// Wait for modifier keys (Ctrl/Alt/Shift/Super) to be released before
+    /// typing transcribed text. Prevents the typed letters from combining
+    /// with held modifiers and triggering compositor or application
+    /// keybindings (e.g. Super+X, Ctrl+W).
+    ///
+    /// Requires `/dev/input` access (typically `input` group membership).
+    /// Silently disabled when access is unavailable; output proceeds as
+    /// before in that case.
+    #[serde(default = "default_true")]
+    pub wait_for_modifier_release: bool,
+
+    /// Maximum time (milliseconds) to wait for modifier keys to be released
+    /// before falling back to clipboard output. Prevents a stuck modifier from
+    /// indefinitely blocking transcription delivery.
+    #[serde(default = "default_modifier_release_timeout_ms")]
+    pub modifier_release_timeout_ms: u64,
+}
+
+fn default_modifier_release_timeout_ms() -> u64 {
+    750
 }
 
 impl OutputConfig {
@@ -2059,6 +2095,8 @@ impl Default for Config {
                 file_mode: FileMode::default(),
                 restore_clipboard: false,
                 restore_clipboard_delay_ms: default_restore_clipboard_delay(),
+                wait_for_modifier_release: true,
+                modifier_release_timeout_ms: default_modifier_release_timeout_ms(),
             },
             engine: TranscriptionEngine::default(),
             parakeet: None,

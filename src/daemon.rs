@@ -1899,6 +1899,10 @@ impl Daemon {
                     let output_options = output::OutputOptions {
                         pre_output_command: output_config.pre_output_command.as_deref(),
                         post_output_command: output_config.post_output_command.as_deref(),
+                        wait_for_modifier_release: output_config.wait_for_modifier_release,
+                        modifier_release_timeout: std::time::Duration::from_millis(
+                            output_config.modifier_release_timeout_ms,
+                        ),
                     };
 
                     if let Err(e) =
