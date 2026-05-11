@@ -30,9 +30,12 @@ pub mod paste;
 #[cfg(target_os = "macos")]
 pub mod pbcopy;
 pub mod post_process;
+pub mod streaming;
 pub mod wtype;
 pub mod xclip;
 pub mod ydotool;
+
+pub use streaming::StreamingSession;
 
 use crate::config::{OutputConfig, OutputDriver};
 use crate::error::OutputError;
