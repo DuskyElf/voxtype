@@ -154,6 +154,13 @@ impl StreamingSession {
         let opts = OutputOptions {
             pre_output_command,
             post_output_command,
+            // Streaming output runs while the hotkey is held — the user's
+            // modifiers will be down throughout. Waiting for release would
+            // stall every partial until release, defeating the point of
+            // streaming. The modifier-release guard applies to one-shot
+            // (non-streaming) output only.
+            wait_for_modifier_release: false,
+            modifier_release_timeout: std::time::Duration::from_millis(0),
         };
         output_with_fallback(chain, &to_type, opts).await?;
 
