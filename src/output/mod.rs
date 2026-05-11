@@ -24,6 +24,7 @@ pub mod cgevent;
 pub mod clipboard;
 pub mod dotool;
 pub mod eitype;
+pub mod modifier_guard;
 #[cfg(target_os = "macos")]
 pub mod osascript;
 pub mod paste;
@@ -434,6 +435,20 @@ pub async fn run_hook(command: &str, hook_name: &str) -> Result<(), String> {
 pub struct OutputOptions<'a> {
     pub pre_output_command: Option<&'a str>,
     pub post_output_command: Option<&'a str>,
+    /// Wait for modifier keys (Ctrl/Alt/Shift/Super) to be released before
+    /// invoking keystroke-synthesizing output methods.
+    pub wait_for_modifier_release: bool,
+    /// Maximum time to wait for modifier release before skipping keystroke
+    /// methods and falling through to clipboard-only methods.
+    pub modifier_release_timeout: std::time::Duration,
+}
+
+/// Output methods that synthesize keystrokes the compositor can interpret as
+/// keybindings when modifiers are held. Used to filter the chain when the
+/// modifier-release wait times out.
+fn is_keystroke_method(name: &str) -> bool {
+    matches!(name, "wtype" | "eitype" | "dotool" | "ydotool")
+        || name.starts_with("paste")
 }
 
 /// Try each output method in the chain until one succeeds
@@ -446,6 +461,29 @@ pub async fn output_with_fallback(
     // Normalize curly quotes to ASCII to prevent line break issues with keyboard tools
     let normalized_text = normalize_quotes(text);
 
+    // If the modifier guard is enabled, snapshot kernel-level key state and
+    // wait for any held modifiers to be released. This prevents typed letters
+    // from combining with Super/Ctrl/Alt/Shift and firing compositor or
+    // application keybindings. Disabled and timed-out cases both leave the
+    // chain runnable; only the latter skips keystroke-synthesizing methods.
+    let mut skip_keystroke_methods = false;
+    if options.wait_for_modifier_release {
+        let mut guard = modifier_guard::ModifierGuard::new();
+        if guard
+            .wait_for_release(options.modifier_release_timeout)
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                timeout_ms = options.modifier_release_timeout.as_millis() as u64,
+                "Modifier keys still held after timeout; skipping \
+                 keystroke-synthesizing methods and using clipboard fallback \
+                 to avoid triggering keybindings"
+            );
+            skip_keystroke_methods = true;
+        }
+    }
+
     // Run pre-output hook if configured (e.g., switch to modifier-suppressing submap)
     if let Some(cmd) = options.pre_output_command {
         if let Err(e) = run_hook(cmd, "pre_output").await {
@@ -457,6 +495,14 @@ pub async fn output_with_fallback(
     // Try each output method
     let mut result = Err(OutputError::AllMethodsFailed);
     for output in chain {
+        if skip_keystroke_methods && is_keystroke_method(output.name()) {
+            tracing::debug!(
+                "{} skipped (modifier still held), trying next",
+                output.name()
+            );
+            continue;
+        }
+
         if !output.is_available().await {
             tracing::debug!("{} not available, trying next", output.name());
             continue;
@@ -539,6 +585,17 @@ mod tests {
         let text = "Café \u{2019} emoji 😀";
         let result = normalize_quotes(text);
         assert_eq!(result, "Café ' emoji 😀");
+    }
+
+    #[test]
+    fn test_is_keystroke_method_classification() {
+        assert!(is_keystroke_method("wtype"));
+        assert!(is_keystroke_method("eitype"));
+        assert!(is_keystroke_method("dotool"));
+        assert!(is_keystroke_method("ydotool"));
+        assert!(is_keystroke_method("paste (clipboard + keystroke)"));
+        assert!(!is_keystroke_method("clipboard (wl-copy)"));
+        assert!(!is_keystroke_method("clipboard (xclip)"));
     }
 
     #[test]

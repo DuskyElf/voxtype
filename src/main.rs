@@ -336,6 +336,15 @@ async fn main() -> anyhow::Result<()> {
     if let Some(cmd) = cli.pre_recording_command {
         config.output.pre_recording_command = Some(cmd);
     }
+    if cli.wait_for_modifier_release {
+        config.output.wait_for_modifier_release = true;
+    }
+    if cli.no_wait_for_modifier_release {
+        config.output.wait_for_modifier_release = false;
+    }
+    if let Some(ms) = cli.modifier_release_timeout_ms {
+        config.output.modifier_release_timeout_ms = ms;
+    }
 
     // VAD overrides
     if cli.vad {
@@ -1719,6 +1728,14 @@ async fn show_config(config: &config::Config) -> anyhow::Result<()> {
     println!(
         "  restore_clipboard_delay_ms = {}",
         config.output.restore_clipboard_delay_ms
+    );
+    println!(
+        "  wait_for_modifier_release = {}",
+        config.output.wait_for_modifier_release
+    );
+    println!(
+        "  modifier_release_timeout_ms = {}",
+        config.output.modifier_release_timeout_ms
     );
 
     println!("\n[output.notification]");
