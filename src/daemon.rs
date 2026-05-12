@@ -3137,8 +3137,20 @@ impl Daemon {
                 }, if state.is_streaming() && streaming_handle.is_some() => {
                     match event {
                         Some(StreamingEvent::Partial { text, .. }) => {
-                            if let Some(s) = streaming_session.as_mut() {
-                                s.observe_partial(text);
+                            if let (Some(s), Some(chain)) =
+                                (streaming_session.as_mut(), streaming_chain.as_ref())
+                            {
+                                if let Err(e) = s.type_partial_delta(
+                                    chain,
+                                    text,
+                                    self.config.output.pre_output_command.as_deref(),
+                                    self.config.output.post_output_command.as_deref(),
+                                ).await {
+                                    tracing::warn!("Streaming partial delta type failed: {}", e);
+                                }
+                                if let State::Streaming { typed_chars, .. } = &mut state {
+                                    *typed_chars = s.typed_chars();
+                                }
                             }
                         }
                         Some(StreamingEvent::Final { text, .. }) => {
