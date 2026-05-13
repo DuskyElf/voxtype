@@ -2373,13 +2373,16 @@ impl Daemon {
                         (HotkeyEvent::Released, ActivationMode::PushToTalk) => {
                             tracing::debug!("Received HotkeyEvent::Released (push-to-talk), state.is_recording() = {}", state.is_recording());
                             if state.is_streaming() {
-                                tracing::debug!("Streaming push-to-talk released; closing audio capture");
+                                tracing::debug!("Streaming push-to-talk released; closing audio capture and disowning session");
                                 if let Some(mut c) = audio_capture.take() {
                                     let _ = c.stop().await;
                                 }
-                                // The backend will see EOF on the samples channel,
-                                // flush(), emit Final + Ended; the event-pump arm
-                                // handles the rest.
+                                // Drop session/chain so the backend's
+                                // post-stop flush emission is dropped at
+                                // the event pump instead of typed.
+                                // Matches the SIGUSR2 stop path.
+                                streaming_session = None;
+                                streaming_chain = None;
                             } else if let State::Recording { model_override, .. } = &state {
                                 let transcriber = match self.get_transcriber_for_recording(
                                     model_override.as_deref(),
@@ -3045,10 +3048,21 @@ impl Daemon {
                 _ = sigusr2.recv() => {
                     tracing::debug!("Received SIGUSR2 (stop recording)");
                     if state.is_streaming() {
-                        tracing::info!("SIGUSR2 stop while streaming; closing capture");
+                        tracing::info!("SIGUSR2 stop while streaming; closing capture and disowning session");
                         if let Some(mut c) = audio_capture.take() {
                             let _ = c.stop().await;
                         }
+                        // Drop the typing surface synchronously. Any
+                        // Final/Partial event the backend emits while
+                        // draining its internal buffer reaches the
+                        // event-pump arm with `streaming_session = None`
+                        // and is discarded instead of typed. Without
+                        // this, parakeet's flush() emission would type
+                        // into whatever window has focus by the time
+                        // the event arrives — voxtype#TBD streaming
+                        // data-leak.
+                        streaming_session = None;
+                        streaming_chain = None;
                     } else if let State::Recording { model_override, .. } = &state {
                         let transcriber = match self.get_transcriber_for_recording(
                             model_override.as_deref(),
