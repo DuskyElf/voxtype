@@ -1056,7 +1056,16 @@ fn send_record_command(
             let current_state =
                 std::fs::read_to_string(&state_file).unwrap_or_else(|_| "idle".to_string());
 
-            if current_state.trim() == "recording" {
+            // "recording" covers the batch and eager paths. "streaming"
+            // covers the Parakeet streaming path. Both are active
+            // capture states whose toggle should send a stop signal,
+            // not start a second session. Without this, toggling
+            // during streaming silently starts a new session while
+            // the original keeps running until the 60s safety
+            // timeout fires — leaking audio into whatever window
+            // has focus.
+            let active = matches!(current_state.trim(), "recording" | "streaming");
+            if active {
                 libc::SIGUSR2 // Stop
             } else {
                 libc::SIGUSR1 // Start
