@@ -606,6 +606,7 @@ impl Default for StatusConfig {
 pub struct StatusIconOverrides {
     pub idle: Option<String>,
     pub recording: Option<String>,
+    pub streaming: Option<String>,
     pub transcribing: Option<String>,
     pub stopped: Option<String>,
 }
@@ -615,6 +616,7 @@ pub struct StatusIconOverrides {
 pub struct ResolvedIcons {
     pub idle: String,
     pub recording: String,
+    pub streaming: String,
     pub transcribing: String,
     pub stopped: String,
 }
@@ -631,6 +633,9 @@ impl StatusConfig {
         }
         if let Some(ref icon) = self.icons.recording {
             icons.recording = icon.clone();
+        }
+        if let Some(ref icon) = self.icons.streaming {
+            icons.streaming = icon.clone();
         }
         if let Some(ref icon) = self.icons.transcribing {
             icons.transcribing = icon.clone();
@@ -649,6 +654,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
         "emoji" => ResolvedIcons {
             idle: "🎙️".to_string(),
             recording: "🎤".to_string(),
+            streaming: "📡".to_string(), // satellite antenna — live broadcast
             transcribing: "⏳".to_string(),
             stopped: "".to_string(),
         },
@@ -656,6 +662,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // Nerd Font icons: microphone, circle, spinner, microphone-slash
             idle: "\u{f130}".to_string(),         // nf-fa-microphone
             recording: "\u{f111}".to_string(),    // nf-fa-circle (filled)
+            streaming: "\u{f519}".to_string(),    // nf-fa-broadcast_tower
             transcribing: "\u{f110}".to_string(), // nf-fa-spinner
             stopped: "\u{f131}".to_string(),      // nf-fa-microphone_slash
         },
@@ -663,12 +670,14 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // Material Design icons matching Omarchy waybar config
             idle: "\u{ec12}".to_string(), // nf-md-microphone_outline
             recording: "\u{f036c}".to_string(), // nf-md-microphone
+            streaming: "\u{f048b}".to_string(), // nf-md-access_point — broadcasting/live
             transcribing: "\u{f051f}".to_string(), // nf-md-timer_sand
             stopped: "\u{ec12}".to_string(), // nf-md-microphone_outline
         },
         "minimal" => ResolvedIcons {
             idle: "○".to_string(),
             recording: "●".to_string(),
+            streaming: "⊙".to_string(), // U+2299 circled dot — active/live
             transcribing: "◐".to_string(),
             stopped: "×".to_string(),
         },
@@ -676,6 +685,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // Material Design Icons (requires MDI font)
             idle: "\u{f036c}".to_string(),         // mdi-microphone
             recording: "\u{f040a}".to_string(),    // mdi-record
+            streaming: "\u{f048b}".to_string(),    // mdi-access-point
             transcribing: "\u{f04ce}".to_string(), // mdi-sync
             stopped: "\u{f036d}".to_string(),      // mdi-microphone-off
         },
@@ -683,6 +693,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // Phosphor Icons (requires Phosphor font)
             idle: "\u{e43a}".to_string(),         // ph-microphone
             recording: "\u{e438}".to_string(),    // ph-record
+            streaming: "\u{e7ee}".to_string(),    // ph-broadcast
             transcribing: "\u{e225}".to_string(), // ph-circle-notch (spinner)
             stopped: "\u{e43b}".to_string(),      // ph-microphone-slash
         },
@@ -690,6 +701,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // VS Code Codicons (requires Codicons font)
             idle: "\u{eb51}".to_string(),         // codicon-mic
             recording: "\u{ebfc}".to_string(),    // codicon-record
+            streaming: "\u{ebba}".to_string(),    // codicon-radio-tower
             transcribing: "\u{eb4c}".to_string(), // codicon-sync
             stopped: "\u{eb52}".to_string(),      // codicon-mute
         },
@@ -697,6 +709,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // Plain text labels (no special fonts required)
             idle: "[MIC]".to_string(),
             recording: "[REC]".to_string(),
+            streaming: "[LIVE]".to_string(),
             transcribing: "[...]".to_string(),
             stopped: "[OFF]".to_string(),
         },
@@ -704,6 +717,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // Unicode geometric shapes (no special fonts required)
             idle: "◯".to_string(),         // U+25EF white circle
             recording: "⬤".to_string(),    // U+2B24 black large circle
+            streaming: "⊙".to_string(),    // U+2299 circled dot operator
             transcribing: "◔".to_string(), // U+25D4 circle with upper right quadrant black
             stopped: "◌".to_string(),      // U+25CC dotted circle
         },
@@ -711,6 +725,7 @@ fn load_icon_theme(theme: &str) -> ResolvedIcons {
             // Media player style (no special fonts required)
             idle: "▶".to_string(),         // U+25B6 play
             recording: "●".to_string(),    // U+25CF black circle
+            streaming: "⇉".to_string(),    // U+21C9 paired rightward arrows — flow
             transcribing: "↻".to_string(), // U+21BB clockwise arrow
             stopped: "■".to_string(),      // U+25A0 black square
         },
@@ -739,6 +754,7 @@ fn load_custom_icon_theme(path: &str) -> Result<ResolvedIcons, String> {
     struct ThemeFile {
         idle: Option<String>,
         recording: Option<String>,
+        streaming: Option<String>,
         transcribing: Option<String>,
         stopped: Option<String>,
     }
@@ -751,6 +767,7 @@ fn load_custom_icon_theme(path: &str) -> Result<ResolvedIcons, String> {
     Ok(ResolvedIcons {
         idle: theme.idle.unwrap_or(base.idle),
         recording: theme.recording.unwrap_or(base.recording),
+        streaming: theme.streaming.unwrap_or(base.streaming),
         transcribing: theme.transcribing.unwrap_or(base.transcribing),
         stopped: theme.stopped.unwrap_or(base.stopped),
     })
@@ -2750,6 +2767,7 @@ mod tests {
             icons: StatusIconOverrides {
                 idle: None,
                 recording: Some("🔴".to_string()),
+                streaming: None,
                 transcribing: None,
                 stopped: Some("⚫".to_string()),
             },

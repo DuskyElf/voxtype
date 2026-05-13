@@ -1429,6 +1429,7 @@ fn format_state_json(
 ) -> String {
     let (text, base_tooltip) = match state {
         "recording" => (&icons.recording, "Recording..."),
+        "streaming" => (&icons.streaming, "Streaming live..."),
         "transcribing" => (&icons.transcribing, "Transcribing..."),
         "idle" => (&icons.idle, "Voxtype ready - hold hotkey to record"),
         "stopped" => (&icons.stopped, "Voxtype not running"),
