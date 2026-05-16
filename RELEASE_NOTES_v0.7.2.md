@@ -61,7 +61,8 @@ workspaces, opening menus).
 The daemon now takes an `EVIOCGKEY` snapshot of keyboard state via evdev
 before typing output, and waits for any held modifier to be released
 before sending keystrokes. If the timeout is hit (default 750ms) the
-output falls back to clipboard so the transcription is not lost.
+output falls back to clipboard so the transcription is not lost, and a
+desktop notification tells the user where the text went.
 
 **Why use it:** No more "voxtype just closed my window" surprises after
 a long dictation. Works on Hyprland, Sway, River, and any

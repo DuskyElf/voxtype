@@ -483,6 +483,14 @@ pub async fn output_with_fallback(
                  keystroke-synthesizing methods and using clipboard fallback \
                  to avoid triggering keybindings"
             );
+            // Surface the fallback to the user so they know where the
+            // transcription went. Silent clipboard fallback leaves users
+            // staring at an empty cursor wondering why nothing was typed.
+            crate::notification::send(
+                "Voxtype",
+                "Modifier key held too long, transcription copied to clipboard.",
+            )
+            .await;
             skip_keystroke_methods = true;
         }
     }
