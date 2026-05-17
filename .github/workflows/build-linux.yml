@@ -235,7 +235,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-${{ matrix.arch }}-${{ matrix.variant }}
+          name: voxtype-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}-${{ matrix.variant }}
           path: releases/${{ steps.version.outputs.version }}/voxtype-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}-${{ matrix.variant }}*
           if-no-files-found: error
           retention-days: 14
@@ -272,7 +272,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: linux-*
+          # Pull each matrix-job artifact (named voxtype-${VERSION}-linux-${arch}-${variant})
+          # but skip the combined linux-all artifact this same job will write.
+          pattern: voxtype-*-linux-*-*
 
       - name: Collect binaries
         run: |
@@ -308,7 +310,7 @@ jobs:
       - name: Upload combined artifact
         uses: actions/upload-artifact@v4
         with:
-          name: linux-release-all
+          name: voxtype-${{ steps.version.outputs.version }}-linux-all
           path: |
             releases/${{ steps.version.outputs.version }}/voxtype-*
             releases/${{ steps.version.outputs.version }}/SHA256SUMS.txt
