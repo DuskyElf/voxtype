@@ -46,8 +46,12 @@ WORKDIR /build
 # Copy source code
 COPY . .
 
-# Build with native optimizations (will use AVX-512 if available on host)
-ENV RUSTFLAGS="-C target-cpu=native"
+# Cross-compile to the x86-64-v4 microarch level (AVX-512F+BW+CD+DQ+VL).
+# The build host does not need to execute AVX-512 to emit it. See the comment
+# in Dockerfile.avx512 for the rationale.
+ENV RUSTFLAGS="-C target-cpu=x86-64-v4"
+ENV CFLAGS="-march=x86-64-v4"
+ENV CXXFLAGS="-march=x86-64-v4"
 
 # ONNX Runtime will be downloaded during build by the ort crate
 ENV ORT_STRATEGY=download

@@ -38,21 +38,34 @@ WORKDIR /build
 
 COPY . .
 
-# Build with native optimizations (will use AVX-512 if available on host)
-ENV RUSTFLAGS="-C target-cpu=native"
+# Cross-compile to the x86-64-v4 microarch level (AVX-512F+BW+CD+DQ+VL).
+# The build host does not need to execute AVX-512 to emit it — the compiler
+# generates the assembly regardless. This lets GitHub-hosted runners (which
+# often lack AVX-512 in their CPUs) build a valid AVX-512 binary.
+ENV RUSTFLAGS="-C target-cpu=x86-64-v4"
+
+# whisper.cpp / ggml is compiled by whisper-rs's build.rs via CMake. The Rust
+# RUSTFLAGS above only affect Rust code; pass the equivalent march flag to
+# the C/C++ compilers so whisper.cpp also emits AVX-512 rather than detecting
+# the runner's CPU.
+ENV CFLAGS="-march=x86-64-v4"
+ENV CXXFLAGS="-march=x86-64-v4"
+ENV WHISPER_CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_AVX512=ON -DGGML_AVX512_VBMI=ON -DGGML_AVX512_VNNI=ON"
 
 RUN cargo build --release \
     && cp target/release/voxtype /tmp/voxtype-avx512
 
-# Verify AVX-512 instructions ARE present
+# Verify AVX-512 instructions ARE present. Fail the build if not, so the
+# pipeline never produces a mislabeled binary.
 RUN echo "=== Verifying AVX-512 binary ===" \
     && avx512_count=$(objdump -d /tmp/voxtype-avx512 | grep -cE 'zmm|vpternlog|vpermt2|\{1to' || echo 0) \
     && echo "  AVX-512 instructions: $avx512_count" \
     && if [ "$avx512_count" -eq 0 ]; then \
-         echo "WARNING: No AVX-512 instructions found. Is the host AVX-512 capable?"; \
-       else \
-         echo "✓ AVX-512 binary contains $avx512_count AVX-512 instructions"; \
-       fi
+         echo "ERROR: AVX-512 binary contains zero AVX-512 instructions." \
+         && echo "  Likely cause: target-cpu and/or CMake march flags reverted to host detection." \
+         && exit 1; \
+       fi \
+    && echo "✓ AVX-512 binary contains $avx512_count AVX-512 instructions"
 
 CMD mkdir -p /output \
     && cp /tmp/voxtype-avx512 /output/voxtype-${VERSION}-linux-x86_64-avx512 \
