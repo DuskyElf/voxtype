@@ -156,6 +156,24 @@ owns arm64 hardware to smoke-test against, so users who run these and
 report back are the ones validating them in practice. File issues with
 hardware details if something breaks.
 
+**Manual install only in 0.7.2.** The .deb / .rpm / AUR packages stay
+x86_64-only for this release because voxtype's installed-binary
+switching logic (in `src/setup/gpu.rs`) does not yet recognize arm64
+variants. Download the binary directly from the GitHub release page
+and drop it into `/usr/local/bin/voxtype`:
+
+```bash
+curl -L https://github.com/peteonrails/voxtype/releases/download/v0.7.2/voxtype-0.7.2-linux-aarch64-cpu \
+  -o /usr/local/bin/voxtype
+chmod 755 /usr/local/bin/voxtype
+voxtype --version
+```
+
+(Substitute `aarch64-onnx` for the ONNX-engine build.) The aarch64
+binaries get full package-tooling integration in v0.7.3 alongside a
+chosen naming convention and `arch=('x86_64' 'aarch64')` in the
+PKGBUILDs.
+
 ## Acknowledgments
 
 - **André Silva** for the OSD startup-visibility fix and the Nix flake

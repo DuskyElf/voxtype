@@ -197,6 +197,40 @@ nix build github:peteonrails/voxtype/v0.7.1#osdGtk4
 inputs.voxtype.url = "github:peteonrails/voxtype/v0.7.1";
 ```
 
+### Linux arm64 (aarch64) — manual install
+
+The 0.7.2 release ships two experimental arm64 Linux binaries for
+Raspberry Pi 4/5, Ampere servers, Snapdragon X laptops, and AWS
+Graviton instances. They are not yet wired into the .deb / .rpm / AUR
+packages, so install is manual:
+
+```bash
+# Whisper engine, CPU-only
+curl -L https://github.com/peteonrails/voxtype/releases/download/v0.7.2/voxtype-0.7.2-linux-aarch64-cpu \
+  -o /tmp/voxtype
+chmod 755 /tmp/voxtype
+sudo mv /tmp/voxtype /usr/local/bin/voxtype
+voxtype --version
+
+# Or, for the ONNX engines (Parakeet, Moonshine, SenseVoice, Paraformer, etc.)
+curl -L https://github.com/peteonrails/voxtype/releases/download/v0.7.2/voxtype-0.7.2-linux-aarch64-onnx \
+  -o /tmp/voxtype
+chmod 755 /tmp/voxtype
+sudo mv /tmp/voxtype /usr/local/bin/voxtype
+```
+
+These binaries are CPU-only. No CUDA, MIGraphX, or Vulkan support on
+arm64 in 0.7.2 because the Jetson CUDA toolchain is awkward and there
+is no mainstream consumer arm64 hardware with Vulkan GPUs yet.
+
+Once installed, the rest of the setup (input group, models, hotkey)
+is the same as on x86_64. Skip to [Post-Install Setup](#post-install-setup).
+
+If you run into issues, please file a GitHub issue with your hardware
+details (CPU, distro, kernel). Real-world reports from arm64 users
+inform the v0.7.3 work that will integrate arm64 into the package
+tooling.
+
 ### AppImage
 
 Self-contained binary for distros that don't have a packaged voxtype.
