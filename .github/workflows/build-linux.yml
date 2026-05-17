@@ -1,5 +1,11 @@
 name: Build Linux
 
+# `contents: write` is required by softprops/action-gh-release@v1 to create
+# the GH release and upload assets on tag push. Without it, the release job
+# fails with HTTP 403 even though the matrix builds succeed.
+permissions:
+  contents: write
+
 # Builds the full 8-binary x86_64 release matrix using Docker for every variant.
 # Each Dockerfile pins a glibc cap via its base image; the matrix mirrors that
 # with a matching ubuntu host runner as belt-and-suspenders. See CLAUDE.md

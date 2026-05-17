@@ -1,5 +1,11 @@
 name: Build macOS
 
+# `contents: write` is required by softprops/action-gh-release@v1 to create
+# the GH release and upload assets on tag push. Without it the upload step
+# fails with HTTP 403 even though the cargo build succeeds.
+permissions:
+  contents: write
+
 on:
   push:
     tags:
