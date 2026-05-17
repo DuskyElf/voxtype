@@ -171,7 +171,16 @@ jobs:
           # The Dockerfile already sets the binary to 755; no chmod needed.
           # GPU variants may not have CUDA/ROCm on the host runner; --version should
           # still resolve without loading providers.
-          "${BIN}" --version
+          # AVX-512 variants are cross-compiled with target-cpu=x86-64-v4. Skip
+          # the runtime --version check on those because the GitHub-hosted
+          # runner CPU usually lacks AVX-512 and would SIGILL. The Dockerfile's
+          # in-build AVX-512 presence check already proves the binary is valid.
+          if [[ "${{ matrix.variant }}" == *avx512* ]]; then
+            echo "Skipping --version check on cross-compiled AVX-512 binary (runner CPU lacks AVX-512)."
+            file "${BIN}"
+          else
+            "${BIN}" --version
+          fi
 
       - name: Verify glibc cap (max <= ${{ matrix.glibc_cap }})
         run: |
