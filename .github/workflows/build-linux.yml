@@ -205,7 +205,7 @@ jobs:
             exit 1
           fi
 
-      - name: Verify zero AVX-512 instructions
+      - name: Verify AVX-512 absence (AVX2 and Vulkan variants only)
         if: matrix.check_no_avx512
         run: |
           set -euo pipefail
